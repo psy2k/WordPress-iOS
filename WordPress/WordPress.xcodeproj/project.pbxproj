@@ -750,7 +750,6 @@
 		93C1147F18EC5DD500DAC95C /* AccountService.m in Sources */ = {isa = PBXBuildFile; fileRef = 93C1147E18EC5DD500DAC95C /* AccountService.m */; };
 		93C1148218EDA42500DAC95C /* AccountServiceRemote.m in Sources */ = {isa = PBXBuildFile; fileRef = 93C1148118EDA42500DAC95C /* AccountServiceRemote.m */; };
 		93C1148518EDF6E100DAC95C /* BlogService.m in Sources */ = {isa = PBXBuildFile; fileRef = 93C1148418EDF6E100DAC95C /* BlogService.m */; };
-		93C1148818EF157500DAC95C /* BlogServiceRemote.m in Sources */ = {isa = PBXBuildFile; fileRef = 93C1148718EF157500DAC95C /* BlogServiceRemote.m */; };
 		93C4864F181043D700A24725 /* ActivityLogDetailViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 93069F581762410B000C966D /* ActivityLogDetailViewController.m */; };
 		93C486501810442200A24725 /* SupportViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 93027BB71758332300483FFD /* SupportViewController.m */; };
 		93C486511810445D00A24725 /* ActivityLogViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 93069F55176237A4000C966D /* ActivityLogViewController.m */; };
@@ -840,6 +839,8 @@
 		E11C91D5135771010072A811 /* italic.png in Resources */ = {isa = PBXBuildFile; fileRef = E11C91CF135771010072A811 /* italic.png */; };
 		E11C91D6135771010072A811 /* italic@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = E11C91D0135771010072A811 /* italic@2x.png */; };
 		E11C91D8135771520072A811 /* paperclip@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = E11C91D7135771520072A811 /* paperclip@2x.png */; };
+		E121150C18FD5AF900B0065F /* BlogServiceRemoteREST.m in Sources */ = {isa = PBXBuildFile; fileRef = E121150B18FD5AF900B0065F /* BlogServiceRemoteREST.m */; };
+		E121150F18FD5C0100B0065F /* BlogServiceRemoteXMLRPC.m in Sources */ = {isa = PBXBuildFile; fileRef = E121150E18FD5C0100B0065F /* BlogServiceRemoteXMLRPC.m */; };
 		E125443C12BF5A7200D87A0A /* WordPress.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = E125443B12BF5A7200D87A0A /* WordPress.xcdatamodeld */; };
 		E125445612BF5B3900D87A0A /* Category.m in Sources */ = {isa = PBXBuildFile; fileRef = E125445512BF5B3900D87A0A /* Category.m */; };
 		E125451812BF68F900D87A0A /* Page.m in Sources */ = {isa = PBXBuildFile; fileRef = E125451712BF68F900D87A0A /* Page.m */; };
@@ -1942,7 +1943,6 @@
 		93C1148318EDF6E100DAC95C /* BlogService.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = BlogService.h; sourceTree = "<group>"; };
 		93C1148418EDF6E100DAC95C /* BlogService.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = BlogService.m; sourceTree = "<group>"; };
 		93C1148618EF157500DAC95C /* BlogServiceRemote.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = BlogServiceRemote.h; sourceTree = "<group>"; };
-		93C1148718EF157500DAC95C /* BlogServiceRemote.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = BlogServiceRemote.m; sourceTree = "<group>"; };
 		93FA0F0118E451A80007903B /* LICENSE */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = LICENSE; path = ../LICENSE; sourceTree = "<group>"; };
 		93FA0F0218E451A80007903B /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = README.md; path = ../README.md; sourceTree = "<group>"; };
 		93FA0F0318E451A80007903B /* update-translations.rb */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.ruby; name = "update-translations.rb"; path = "../update-translations.rb"; sourceTree = "<group>"; };
@@ -2084,6 +2084,10 @@
 		E11C91CF135771010072A811 /* italic.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = italic.png; path = Resources/Images/italic.png; sourceTree = "<group>"; };
 		E11C91D0135771010072A811 /* italic@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "italic@2x.png"; path = "Resources/Images/italic@2x.png"; sourceTree = "<group>"; };
 		E11C91D7135771520072A811 /* paperclip@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "paperclip@2x.png"; path = "Resources/Images/paperclip@2x.png"; sourceTree = "<group>"; };
+		E121150A18FD5AF900B0065F /* BlogServiceRemoteREST.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = BlogServiceRemoteREST.h; sourceTree = "<group>"; };
+		E121150B18FD5AF900B0065F /* BlogServiceRemoteREST.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = BlogServiceRemoteREST.m; sourceTree = "<group>"; };
+		E121150D18FD5C0100B0065F /* BlogServiceRemoteXMLRPC.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = BlogServiceRemoteXMLRPC.h; sourceTree = "<group>"; };
+		E121150E18FD5C0100B0065F /* BlogServiceRemoteXMLRPC.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = BlogServiceRemoteXMLRPC.m; sourceTree = "<group>"; };
 		E1225A4C147E6D2400B4F3A0 /* tr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = tr; path = tr.lproj/Localizable.strings; sourceTree = "<group>"; };
 		E1225A4D147E6D2C00B4F3A0 /* id */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = id; path = id.lproj/Localizable.strings; sourceTree = "<group>"; };
 		E125443D12BF5A7200D87A0A /* WordPress 2.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = "WordPress 2.xcdatamodel"; sourceTree = "<group>"; };
@@ -3388,10 +3392,13 @@
 				93C1147E18EC5DD500DAC95C /* AccountService.m */,
 				93C1148018EDA42500DAC95C /* AccountServiceRemote.h */,
 				93C1148118EDA42500DAC95C /* AccountServiceRemote.m */,
-				93C1148618EF157500DAC95C /* BlogServiceRemote.h */,
-				93C1148718EF157500DAC95C /* BlogServiceRemote.m */,
 				93C1148318EDF6E100DAC95C /* BlogService.h */,
 				93C1148418EDF6E100DAC95C /* BlogService.m */,
+				93C1148618EF157500DAC95C /* BlogServiceRemote.h */,
+				E121150A18FD5AF900B0065F /* BlogServiceRemoteREST.h */,
+				E121150B18FD5AF900B0065F /* BlogServiceRemoteREST.m */,
+				E121150D18FD5C0100B0065F /* BlogServiceRemoteXMLRPC.h */,
+				E121150E18FD5C0100B0065F /* BlogServiceRemoteXMLRPC.m */,
 				93FA59DB18D88C1C001446BC /* CategoryService.h */,
 				93FA59DC18D88C1C001446BC /* CategoryService.m */,
 				93FA59DE18D8986D001446BC /* CategoryServiceRemote.h */,
@@ -5279,6 +5286,7 @@
 				46E4792C185BD2B8007AA76F /* CommentView.m in Sources */,
 				30EABE0918A5903400B73A9C /* WPBlogTableViewCell.m in Sources */,
 				E2AA87A518523E5300886693 /* UIView+Subviews.m in Sources */,
+				E121150F18FD5C0100B0065F /* BlogServiceRemoteXMLRPC.m in Sources */,
 				93C486511810445D00A24725 /* ActivityLogViewController.m in Sources */,
 				ACC156CC0E10E67600D6E1A0 /* EditPostViewController.m in Sources */,
 				93C1148518EDF6E100DAC95C /* BlogService.m in Sources */,
@@ -5359,6 +5367,7 @@
 				E13EB7A5157D230000885780 /* WordPressComApi.m in Sources */,
 				5D5D0027187DA9D30027CEF6 /* CategoriesViewController.m in Sources */,
 				E1E4CE0B1773C59B00430844 /* WPAvatarSource.m in Sources */,
+				E121150C18FD5AF900B0065F /* BlogServiceRemoteREST.m in Sources */,
 				FD4500D11580DF3600F2B0E6 /* UIColor+Helpers.m in Sources */,
 				5D2B80D11592447200161F6E /* QuickPhotoButtonView.m in Sources */,
 				852F4E8C17BED193005ED539 /* PostSettingsSelectionViewController.m in Sources */,
@@ -5456,7 +5465,6 @@
 				5DB3BA0518D0E7B600F3F3E9 /* WPPickerView.m in Sources */,
 				5D42A400175E75EE005CFF05 /* ReaderVideoView.m in Sources */,
 				5D42A405175E76A7005CFF05 /* WPImageViewController.m in Sources */,
-				93C1148818EF157500DAC95C /* BlogServiceRemote.m in Sources */,
 				5D42A406175E76A7005CFF05 /* WPWebVideoViewController.m in Sources */,
 				5D2A8FF2175EC15800263144 /* ReaderTextFormView.m in Sources */,
 				5D5A953B1760DDE0000F7A1E /* ReaderReblogFormView.m in Sources */,
