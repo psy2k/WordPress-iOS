@@ -10,9 +10,7 @@ typedef void (^PostsHandler)(NSArray *posts);
 typedef void (^PagesHandler)(NSArray *pages);
 typedef void (^MediaHandler)(NSArray *media);
 
-@interface BlogServiceRemote : NSObject
-
-- (id)initWithRemoteApi:(WPXMLRPCClient *)api;
+@protocol BlogServiceRemoteInterface <NSObject>
 
 - (void)syncPostsAndMetadataForBlog:(Blog *)blog
                   categoriesSuccess:(CategoriesHandler)categoriesSuccess
@@ -65,5 +63,11 @@ typedef void (^MediaHandler)(NSArray *media);
                     overallSuccess:(void (^)(void))overallSuccess
                            failure:(void (^)(NSError *error))failure;
 
+
+@end
+
+@interface BlogServiceRemote : NSObject<BlogServiceRemoteInterface>
+
+- (id)initWithRemoteApi:(WPXMLRPCClient *)api;
 
 @end

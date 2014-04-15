@@ -372,6 +372,10 @@ NSString *const LastUsedBlogURLDefaultsKey = @"LastUsedBlogURLDefaultsKey";
     return count;
 }
 
+- (id<BlogServiceRemoteInterface>)remoteForBlog:(Blog *)blog {
+    return [[BlogServiceRemote alloc] initWithRemoteApi:blog.api];
+}
+
 #pragma mark - Completion handlers
 
 - (CategoriesHandler)categoriesHandlerWithBlog:(Blog *)blog completionHandler:(void (^)(void))completion
