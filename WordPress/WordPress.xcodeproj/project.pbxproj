@@ -12,6 +12,7 @@
 		00F2E3FB166EEFE100D0527C /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E10B3651158F2D3F00419A93 /* QuartzCore.framework */; };
 		03958062100D6CFC00850742 /* WPLabel.m in Sources */ = {isa = PBXBuildFile; fileRef = 03958061100D6CFC00850742 /* WPLabel.m */; };
 		067D911C15654CE79F0A4A29 /* libPods-WordPressTest.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D4972215061A4C21AD2CD5B8 /* libPods-WordPressTest.a */; };
+		1ABBF85C1942E96D008144B1 /* WordPressComApiCredentials.m in Sources */ = {isa = PBXBuildFile; fileRef = 1ABBF85B1942E96D008144B1 /* WordPressComApiCredentials.m */; };
 		1D3623260D0F684500981E51 /* WordPressAppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D3623250D0F684500981E51 /* WordPressAppDelegate.m */; };
 		1D60589B0D05DD56006BFB54 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 29B97316FDCFA39411CA2CEA /* main.m */; };
 		1D60589F0D05DD5A006BFB54 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D30AB110D05D00D00671497 /* Foundation.framework */; };
@@ -898,7 +899,6 @@
 		E174853016B028BF00D02746 /* keyboardButton@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = E1B62A8A13AAA96F00A6FCA4 /* keyboardButton@2x.png */; };
 		E174853116B028C300D02746 /* keyboardButton.png in Resources */ = {isa = PBXBuildFile; fileRef = E1B62A8813AAA5FE00A6FCA4 /* keyboardButton.png */; };
 		E174F6E6172A73960004F23A /* WPAccount.m in Sources */ = {isa = PBXBuildFile; fileRef = E105E9CE1726955600C0D9E7 /* WPAccount.m */; };
-		E1756E651694A99400D9EC00 /* WordPressComApiCredentials.m in Sources */ = {isa = PBXBuildFile; fileRef = E1756E641694A99400D9EC00 /* WordPressComApiCredentials.m */; };
 		E177087913AAAD5800EA6C72 /* keyboardButton~ipad.png in Resources */ = {isa = PBXBuildFile; fileRef = E177087813AAAD5800EA6C72 /* keyboardButton~ipad.png */; };
 		E177087E13AAC19700EA6C72 /* redo~ipad.png in Resources */ = {isa = PBXBuildFile; fileRef = E177087A13AAC19700EA6C72 /* redo~ipad.png */; };
 		E177087F13AAC19700EA6C72 /* redoDisabled~ipad.png in Resources */ = {isa = PBXBuildFile; fileRef = E177087B13AAC19700EA6C72 /* redoDisabled~ipad.png */; };
@@ -1060,6 +1060,7 @@
 		031669580FFC81A20045D052 /* CommentsTableViewDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CommentsTableViewDelegate.h; sourceTree = "<group>"; };
 		03958060100D6CFC00850742 /* WPLabel.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WPLabel.h; sourceTree = "<group>"; };
 		03958061100D6CFC00850742 /* WPLabel.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WPLabel.m; sourceTree = "<group>"; };
+		1ABBF85B1942E96D008144B1 /* WordPressComApiCredentials.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = WordPressComApiCredentials.m; path = WordPressApi/WordPressComApiCredentials.m; sourceTree = SOURCE_ROOT; };
 		1ADA607A1941A72100CA7F8B /* el */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = el; path = el.lproj/Localizable.strings; sourceTree = "<group>"; };
 		1D30AB110D05D00D00671497 /* Foundation.framework */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		1D3623240D0F684500981E51 /* WordPressAppDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WordPressAppDelegate.h; sourceTree = "<group>"; };
@@ -2202,7 +2203,6 @@
 		E1756DD41694560100D9EC00 /* WordPressComApiCredentials.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WordPressComApiCredentials.h; sourceTree = "<group>"; };
 		E1756DD51694560100D9EC00 /* WordPressComApiCredentials.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WordPressComApiCredentials.m; sourceTree = "<group>"; };
 		E1756E621694A08200D9EC00 /* gencredentials.rb */ = {isa = PBXFileReference; explicitFileType = text.script.ruby; path = gencredentials.rb; sourceTree = "<group>"; };
-		E1756E641694A99400D9EC00 /* WordPressComApiCredentials.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WordPressComApiCredentials.m; sourceTree = "<group>"; };
 		E177087813AAAD5800EA6C72 /* keyboardButton~ipad.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "keyboardButton~ipad.png"; path = "Resources/Images/keyboardButton~ipad.png"; sourceTree = "<group>"; };
 		E177087A13AAC19700EA6C72 /* redo~ipad.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "redo~ipad.png"; path = "Resources/Images/redo~ipad.png"; sourceTree = "<group>"; };
 		E177087B13AAC19700EA6C72 /* redoDisabled~ipad.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "redoDisabled~ipad.png"; path = "Resources/Images/redoDisabled~ipad.png"; sourceTree = "<group>"; };
@@ -4377,7 +4377,7 @@
 		E1756E661694AA1500D9EC00 /* Derived Sources */ = {
 			isa = PBXGroup;
 			children = (
-				E1756E641694A99400D9EC00 /* WordPressComApiCredentials.m */,
+				1ABBF85B1942E96D008144B1 /* WordPressComApiCredentials.m */,
 			);
 			name = "Derived Sources";
 			path = /private/tmp/WordPress.build;
@@ -5519,7 +5519,6 @@
 				CC669B261672C335009E16F8 /* NoteCommentPostBanner.m in Sources */,
 				37B7924D16768FCC0021B3A4 /* NotificationSettingsViewController.m in Sources */,
 				CC669B3A167AA82A009E16F8 /* NoteComment.m in Sources */,
-				E1756E651694A99400D9EC00 /* WordPressComApiCredentials.m in Sources */,
 				5D8D53F119250412003C8859 /* BlogSelectorViewController.m in Sources */,
 				5D3D559718F88C3500782892 /* ReaderPostService.m in Sources */,
 				93FA59DD18D88C1C001446BC /* CategoryService.m in Sources */,
@@ -5533,6 +5532,7 @@
 				B545186018E99AF500AC3A54 /* WPTableHeaderViewCell.m in Sources */,
 				E18EE94B19349EAE00B0A40C /* AccountServiceRemote.m in Sources */,
 				E1D0D81616D3B86800E33F4C /* SafariActivity.m in Sources */,
+				1ABBF85C1942E96D008144B1 /* WordPressComApiCredentials.m in Sources */,
 				85495F4817C6D9A500871A7A /* CommentViewController.m in Sources */,
 				E1D0D82916D3D19200E33F4C /* PocketAPI.m in Sources */,
 				C52C786C187C5C3800FB1D2D /* StatsTodayYesterdayButtonCell.m in Sources */,
