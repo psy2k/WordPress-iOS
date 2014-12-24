@@ -13,12 +13,14 @@
 /// @name Properties
 ///-----------------
 
-@property (nonatomic, copy) NSString *xmlrpc;
-@property (nonatomic, copy) NSString *username;
-@property (nonatomic) BOOL isWpcom;
-@property (nonatomic, strong) NSSet *blogs;
-@property (nonatomic, strong) NSSet *jetpackBlogs;
-@property (nonatomic, readonly) NSArray *visibleBlogs;
+@property (nonatomic, copy)     NSString    *xmlrpc;
+@property (nonatomic, copy)     NSString    *username;
+@property (nonatomic, assign)   BOOL        isWpcom;
+@property (nonatomic, copy)     NSString    *uuid;
+@property (nonatomic, strong)   NSSet       *blogs;
+@property (nonatomic, strong)   NSSet       *jetpackBlogs;
+@property (nonatomic, readonly) NSArray     *visibleBlogs;
+@property (nonatomic, strong)   Blog        *defaultBlog;
 
 /**
  The account's password

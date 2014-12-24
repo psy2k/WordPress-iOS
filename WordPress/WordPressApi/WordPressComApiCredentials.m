@@ -4,6 +4,7 @@
 #define WPCOM_API_CLIENT_SECRET @""
 
 @implementation WordPressComApiCredentials
+
 + (NSString *)client {
     return WPCOM_API_CLIENT_ID;
 }
@@ -32,6 +33,14 @@
     return @"";
 }
 
++ (NSString *)simperiumAppId {
+	return @"";
+}
+
++ (NSString *)simperiumAPIKey {
+	return @"";
+}
+
 + (NSString *)helpshiftAPIKey {
     return  @"";
 }
@@ -44,8 +53,12 @@
     return @"";
 }
 
-+ (NSString *)taplyticsAPIKey {
-    return @"";
++ (NSString *)lookbackToken {
+   return @"";
+}
+
++ (NSString *)appbotXAPIKey {
+   return @"";
 }
 
 @end

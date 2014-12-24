@@ -17,6 +17,7 @@ typedef enum {
 // Attributes
 @property (nonatomic, strong) NSNumber * postID;
 @property (nonatomic, strong) NSString * author;
+@property (nonatomic, strong) NSString * authorAvatarURL;
 @property (nonatomic, strong) NSDate * date_created_gmt;
 @property (nonatomic, strong) NSString * postTitle;
 @property (nonatomic, strong) NSString * content;
@@ -35,6 +36,12 @@ typedef enum {
 @property (nonatomic, assign) BOOL isFeaturedImageChanged;
 
 - (NSArray *)availableStatuses;
+
+/**
+ Returns YES if the post is scheduled to be published on a specific date in the future.
+ */
+- (BOOL)isScheduled;
+
 // Does the post exist on the blog?
 - (BOOL)hasRemote;
 // Deletes post locally
@@ -52,9 +59,5 @@ typedef enum {
 // Subclass methods
 - (NSString *)remoteStatusText;
 + (NSString *)titleForRemoteStatus:(NSNumber *)remoteStatus;
-
-#pragma mark     Data Management
-- (void)uploadWithSuccess:(void (^)())success failure:(void (^)(NSError *error))failure;
-- (void)deletePostWithSuccess:(void (^)())success failure:(void (^)(NSError *error))failure;
 
 @end

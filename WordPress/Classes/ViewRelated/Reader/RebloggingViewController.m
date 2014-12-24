@@ -2,26 +2,28 @@
 
 #import "RebloggingViewController.h"
 #import "ReaderPost.h"
-#import "ReaderPostView.h"
+#import "ReaderPostSimpleContentView.h"
 #import "ReaderPostService.h"
 #import "BlogSelectorViewController.h"
 #import "WPBlogSelectorButton.h"
 #import "BlogService.h"
 #import "ContextManager.h"
 #import "WPToast.h"
+#import "WPTableImageSource.h"
+
+#import <WordPress-iOS-Shared/WPFontManager.h>
 
 CGFloat const ReblogViewPostMargin = 10;
 CGFloat const ReblogViewTextBottomInset = 30;
 
-@interface RebloggingViewController ()<UIPopoverControllerDelegate, UITextViewDelegate>
+@interface RebloggingViewController ()<UIPopoverControllerDelegate, UITextViewDelegate, WPTableImageSourceDelegate>
 
 @property (nonatomic, strong) ReaderPost *post;
 @property (nonatomic, strong) UIButton *titleBarButton;
 @property (nonatomic, strong) UIPopoverController *blogSelectorPopover;
 @property (nonatomic, strong) Blog *blog;
-@property (nonatomic, strong) ReaderPostView *postView;
+@property (nonatomic, strong) ReaderPostSimpleContentView *postView;
 @property (nonatomic, strong) UIView *postViewWrapper;
-@property (nonatomic, strong) CALayer *postViewBackingLayer;
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) UIImage *avatarImage;
 @property (nonatomic, strong) UIImage *featuredImage;
@@ -30,6 +32,7 @@ CGFloat const ReblogViewTextBottomInset = 30;
 @property (nonatomic, strong) UIActivityIndicatorView *activityView;
 @property (nonatomic, strong) UIBarButtonItem *activityBarItem;
 @property (nonatomic, strong) UIBarButtonItem *publishBarItem;
+@property (nonatomic, strong) WPTableImageSource *featuredImageSource;
 
 @end
 
@@ -37,33 +40,35 @@ CGFloat const ReblogViewTextBottomInset = 30;
 
 #pragma mark - Lifecycle Methods
 
-- (void)dealloc {
+- (void)dealloc
+{
     self.delegate = nil;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
-- (id)initWithPost:(id)post featuredImage:(id)image avatarImage:(UIImage *)avatarImage {
+- (id)initWithPost:(ReaderPost *)post
+{
     self = [self init];
     if (self){
         self.post = post;
-        self.featuredImage = image;
-        self.avatarImage = avatarImage;
     }
     return self;
 }
 
-- (void)viewDidLoad {
+- (void)viewDidLoad
+{
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor whiteColor];
     [self configureNavbar];
     [self configureView];
 
-	UITapGestureRecognizer *tgr = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePostViewTapped:)];
+    UITapGestureRecognizer *tgr = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePostViewTapped:)];
     tgr.cancelsTouchesInView = YES;
     [self.postView addGestureRecognizer:tgr];
 }
 
-- (void)viewWillAppear:(BOOL)animated {
+- (void)viewWillAppear:(BOOL)animated
+{
     [super viewWillAppear:animated];
 
     [self layoutViews];
@@ -72,22 +77,24 @@ CGFloat const ReblogViewTextBottomInset = 30;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
 }
 
-- (void)viewWillDisappear:(BOOL)animated {
+- (void)viewWillDisappear:(BOOL)animated
+{
     [super viewWillDisappear:animated];
 
     [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardDidShowNotification object:nil];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardWillHideNotification object:nil];
 }
 
-- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation {
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation
+{
     [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
     [self layoutViews];
 }
 
-
 #pragma mark - Appearance and Layout
 
-- (void)configureNavbar {
+- (void)configureNavbar
+{
     if (!self.navigationItem.rightBarButtonItem) {
         self.publishBarItem = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Publish", @"")
                                                                                   style:UIBarButtonItemStylePlain
@@ -116,12 +123,12 @@ CGFloat const ReblogViewTextBottomInset = 30;
         UIButton *titleButton = self.titleBarButton;
         self.navigationItem.titleView = titleButton;
         NSMutableAttributedString *titleText = [[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@\n", NSLocalizedString(@"Reblog to", @"")]
-                                                                                      attributes:@{ NSFontAttributeName : [UIFont fontWithName:@"OpenSans-Bold" size:14.0] }];
+                                                                                      attributes:@{ NSFontAttributeName : [WPFontManager openSansBoldFontOfSize:14.0] }];
 
         if (!self.blog) {
             self.blog = [blogService lastUsedOrFirstWPcomBlog];
         }
-        NSDictionary *subtextAttributes = @{ NSFontAttributeName: [UIFont fontWithName:@"OpenSans" size:10.0] };
+        NSDictionary *subtextAttributes = @{ NSFontAttributeName: [WPFontManager openSansRegularFontOfSize:10.0] };
         NSMutableAttributedString *titleSubtext = [[NSMutableAttributedString alloc] initWithString:self.blog.blogName
                                                                                          attributes:subtextAttributes];
         [titleText appendAttributedString:titleSubtext];
@@ -130,29 +137,20 @@ CGFloat const ReblogViewTextBottomInset = 30;
     }
 }
 
-- (UIButton *)titleBarButton {
+- (UIButton *)titleBarButton
+{
     if (_titleBarButton) {
         return _titleBarButton;
     }
-    UIButton *titleButton = [WPBlogSelectorButton buttonWithType:UIButtonTypeSystem];
-    titleButton.frame = CGRectMake(0.0f, 0.0f, 200.0f, 33.0f);
-    titleButton.titleLabel.numberOfLines = 2;
-    titleButton.titleLabel.textColor = [UIColor whiteColor];
-    titleButton.titleLabel.textAlignment = NSTextAlignmentCenter;
-    titleButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
-    [titleButton setImage:[UIImage imageNamed:@"icon-navbar-dropdown.png"] forState:UIControlStateNormal];
+    UIButton *titleButton = [WPBlogSelectorButton buttonWithFrame:CGRectMake(0.0f, 0.0f, 200.0f, 33.0f) buttonStyle:WPBlogSelectorButtonTypeStacked];
     [titleButton addTarget:self action:@selector(handleTitleButtonAction:) forControlEvents:UIControlEventTouchUpInside];
-    [titleButton setImageEdgeInsets:UIEdgeInsetsMake(0, 0, 0, 10)];
-    [titleButton setTitleEdgeInsets:UIEdgeInsetsMake(0, 10, 0, 0)];
-    [titleButton setAccessibilityHint:NSLocalizedString(@"Tap to select which site to publish to", nil)];
-
     _titleBarButton = titleButton;
 
     return _titleBarButton;
 }
 
-- (void)configureView {
-
+- (void)configureView
+{
     [self.view addSubview:self.textView];
     [self.textView addSubview:self.postViewWrapper];
     [self.postViewWrapper addSubview:self.postView];
@@ -161,7 +159,8 @@ CGFloat const ReblogViewTextBottomInset = 30;
     [self layoutViews];
 }
 
-- (UITextView *)textView {
+- (UITextView *)textView
+{
     if (_textView) {
         return _textView;
     }
@@ -172,42 +171,39 @@ CGFloat const ReblogViewTextBottomInset = 30;
     _textView.font = [WPStyleGuide regularTextFont];
     _textView.textColor = [WPStyleGuide darkAsNightGrey];
     _textView.accessibilityLabel = NSLocalizedString(@"Optional note", @"Optional note to include with the reblogged post");
-
+    _textView.accessibilityIdentifier = @"Optional note";
     return _textView;
 }
 
-- (UIView *)postViewWrapper {
+- (UIView *)postViewWrapper
+{
     if (_postViewWrapper) {
         return _postViewWrapper;
     }
 
     _postViewWrapper = [[UIView alloc] initWithFrame:self.view.bounds];
     _postViewWrapper.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    CALayer *layer = [[CALayer alloc] init];
-    layer.zPosition = -1;
-    layer.backgroundColor = [[WPStyleGuide itsEverywhereGrey] CGColor];
-    self.postViewBackingLayer = layer;
-    [_postViewWrapper.layer addSublayer:layer];
-
+    _postViewWrapper.backgroundColor = [WPStyleGuide itsEverywhereGrey];
     return _postViewWrapper;
 }
 
-- (ReaderPostView *)postView {
+- (ReaderPostSimpleContentView *)postView
+{
     if (_postView) {
         return _postView;
     }
 
-    self.postView = [[ReaderPostView alloc] initWithFrame:self.view.bounds contentMode:ReaderPostContentModeSimpleSummary];
-    _postView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.postView = [[ReaderPostSimpleContentView alloc] init];
+    _postView.contentProvider = self.post;
     _postView.backgroundColor = [UIColor whiteColor];
-    [_postView configurePost:self.post];
-    [_postView setFeaturedImage:self.featuredImage];
-    [_postView setAvatar:self.avatarImage];
+    [_postView setAvatarImage:[self.post cachedAvatarWithSize:CGSizeMake(WPContentAttributionViewAvatarSize, WPContentAttributionViewAvatarSize)]];
+    [self fetchFeaturedImage];
 
     return _postView;
 }
 
-- (UILabel *)textPromptLabel {
+- (UILabel *)textPromptLabel
+{
     if (_textPromptLabel) {
         return _textPromptLabel;
     }
@@ -227,7 +223,8 @@ CGFloat const ReblogViewTextBottomInset = 30;
     return _textPromptLabel;
 }
 
-- (void)layoutViews {
+- (void)layoutViews
+{
     CGFloat verticleMargin = ReblogViewPostMargin;
     CGFloat horizontalMargin = ReblogViewPostMargin;
     if (IS_IPAD) {
@@ -235,12 +232,15 @@ CGFloat const ReblogViewTextBottomInset = 30;
     }
 
     CGFloat width = CGRectGetWidth(self.view.bounds) - (horizontalMargin * 2);
-    CGFloat height = [ReaderPostView heightForPost:self.post withWidth:width forContentMode:ReaderPostContentModeSimpleSummary];
+    CGSize size = [self.postView sizeThatFits:CGSizeMake(width, CGFLOAT_MAX)];
+    CGFloat height = size.height;
+
+    self.postViewWrapper.frame = CGRectMake(self.view.bounds.origin.x, self.view.bounds.origin.y, self.view.bounds.size.width, height+ verticleMargin * 2);
+
     CGRect frame = CGRectMake(horizontalMargin, verticleMargin, width, height);
     CGFloat top = CGRectGetMaxY(frame) + (verticleMargin * 2);
-    self.postViewWrapper.frame = frame;
-    self.postView.frame = self.postViewWrapper.bounds;
-
+    self.postView.frame = frame;
+    
     self.textView.textContainerInset = UIEdgeInsetsMake(top, ReblogViewPostMargin, ReblogViewTextBottomInset, ReblogViewPostMargin);
 
     frame = CGRectZero;
@@ -250,13 +250,6 @@ CGFloat const ReblogViewTextBottomInset = 30;
     frame.size.height = 26.0f;
     self.textPromptLabel.frame = frame;
 
-    frame = self.postViewWrapper.bounds;
-    CGFloat x = CGRectGetMinX(frame) - horizontalMargin;
-    CGFloat y = CGRectGetMinY(frame) - verticleMargin;
-    CGFloat w = CGRectGetWidth(frame) + horizontalMargin * 2.0f;
-    CGFloat h = CGRectGetHeight(frame) + verticleMargin * 2.0f;
-    self.postViewBackingLayer.frame = CGRectMake(x, y, w, h);
-
     // Refresh the contentSize to account for changes to textContainerInset
     // by calling sizeToFit and then resetting the frame.
     // A little hackish but prevents layout issues due to orientation change.
@@ -264,7 +257,8 @@ CGFloat const ReblogViewTextBottomInset = 30;
     self.textView.frame = self.view.bounds;
 }
 
-- (void)resizeTextView:(NSNotification *)notification {
+- (void)resizeTextView:(NSNotification *)notification
+{
     NSDictionary *keyboardInfo = [notification userInfo];
     CGRect originalKeyboardFrame = [[keyboardInfo objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
     CGRect keyboardFrame = [self.view convertRect:[self.view.window convertRect:originalKeyboardFrame fromWindow:nil] fromView:nil];
@@ -280,7 +274,8 @@ CGFloat const ReblogViewTextBottomInset = 30;
     self.textView.frame = frame;
 }
 
-- (void)moveCursorIntoView {
+- (void)moveCursorIntoView
+{
     // Hacky way to make sure the cursor is in view with iOS7.1's funky cursor positioning.
     dispatch_async(dispatch_get_main_queue(), ^{
         CGRect rect = [self.textView caretRectForPosition:self.textView.selectedTextRange.end];
@@ -289,51 +284,91 @@ CGFloat const ReblogViewTextBottomInset = 30;
     });
 }
 
-- (void)dismiss {
+- (void)dismiss
+{
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
+- (void)fetchFeaturedImage
+{
+    NSURL *imageURL = [self.post featuredImageURLForDisplay];
+    if (!imageURL) {
+        return;
+    }
+
+    if (!self.featuredImageSource) {
+        CGFloat maxWidth = MAX(CGRectGetWidth(self.view.bounds), CGRectGetHeight(self.view.bounds));;
+        CGFloat maxHeight = maxWidth * WPContentViewMaxImageHeightPercentage;
+        self.featuredImageSource = [[WPTableImageSource alloc] initWithMaxSize:CGSizeMake(maxWidth, maxHeight)];
+        self.featuredImageSource.delegate = self;
+    }
+
+    CGFloat width = CGRectGetWidth(self.view.bounds);
+    CGFloat height = round(width * WPContentViewMaxImageHeightPercentage);
+    CGSize size = CGSizeMake(width, height);
+
+    UIImage *image = [self.featuredImageSource imageForURL:imageURL withSize:size];
+    if (image) {
+        [self.postView setFeaturedImage:image];
+    } else {
+        [self.featuredImageSource fetchImageForURL:imageURL
+                                     withSize:size
+                                    indexPath:[NSIndexPath indexPathForRow:0 inSection:0]
+                                    isPrivate:self.post.isPrivate];
+    }
+}
 
 #pragma mark Nabar Button actions
 
-- (void)handleCancelAction:(id)sender {
+- (void)handleCancelAction:(id)sender
+{
     [self dismiss];
 }
 
-- (void)handlePublishAction:(id)sender {
+- (void)handlePublishAction:(id)sender
+{
     [self.textView setEditable:NO];
     self.navigationItem.leftBarButtonItem.enabled = NO;
 
     self.navigationItem.rightBarButtonItem = self.activityBarItem;
-	[self.activityView startAnimating];
+    [self.activityView startAnimating];
 
     NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
     ReaderPostService *service = [[ReaderPostService alloc] initWithManagedObjectContext:context];
 
     [service reblogPost:self.post toSite:[self.blog.blogID integerValue] note:[self.textView.text trim] success:^{
         [WPToast showToastWithMessage:NSLocalizedString(@"Reblogged", @"User reblogged a post.")
-							 andImage:[UIImage imageNamed:@"action_icon_replied"]];
+                             andImage:[UIImage imageNamed:@"action-icon-replied"]];
 
-		if ([self.delegate respondsToSelector:@selector(postWasReblogged:)]) {
-			[self.delegate postWasReblogged:self.post];
-		}
+        if ([self.delegate respondsToSelector:@selector(postWasReblogged:)]) {
+            [self.delegate postWasReblogged:self.post];
+        }
 
         [WPAnalytics track:WPAnalyticsStatReaderRebloggedArticle];
         [self dismiss];
 
     } failure:^(NSError *error) {
-		DDLogError(@"Error Reblogging Post : %@", [error localizedDescription]);
+        NSString *localizedDescription = [error localizedDescription];
+        DDLogError(@"Error Reblogging Post : %@", localizedDescription);
+
         [self.textView setEditable:YES];
         self.navigationItem.leftBarButtonItem.enabled = YES;
-		[self.activityView stopAnimating];
+        [self.activityView stopAnimating];
         self.navigationItem.rightBarButtonItem = self.publishBarItem;
 
-		// TODO: Failure reason.
-        [WPError showAlertWithTitle:NSLocalizedString(@"Reblog failed", nil) message:NSLocalizedString(@"There was a problem reblogging. Please try again.", nil)];
+        NSString *message;
+        if ([localizedDescription length]) {
+            message = localizedDescription;
+        } else {
+            message = NSLocalizedString(@"There was a problem reblogging. Please try again.", @"A generic error message stating there was a problem reblogging a post suggesting the user try again.");
+        }
+
+        [WPError showAlertWithTitle:NSLocalizedString(@"Could not reblog post", @"Error message title stating that an attempt to reblog a post failed.") message:message];
     }];
 }
 
-- (void)handleTitleButtonAction:(id)sender {
+- (void)handleTitleButtonAction:(id)sender
+{
     if (IS_IPAD && self.blogSelectorPopover.isPopoverVisible) {
         [self.blogSelectorPopover dismissPopoverAnimated:YES];
         self.blogSelectorPopover = nil;
@@ -384,38 +419,47 @@ CGFloat const ReblogViewTextBottomInset = 30;
     }
 }
 
+#pragma mark Gesture Recognizer
 
-#pragma mark Gesture Regonizer
-
-- (void)handlePostViewTapped:(id)sender {
+- (void)handlePostViewTapped:(id)sender
+{
     [self.view endEditing:YES];
 }
 
-
 #pragma mark Keyboard Notifications
 
-- (void)keyboardDidShow:(NSNotification *)notification {
+- (void)keyboardDidShow:(NSNotification *)notification
+{
     self.isShowingKeyboard = YES;
     [self resizeTextView:notification];
     [self moveCursorIntoView];
 }
 
-- (void)keyboardWillHide:(NSNotification *)notification {
+- (void)keyboardWillHide:(NSNotification *)notification
+{
     self.isShowingKeyboard = NO;
     [self resizeTextView:notification];
 }
 
-
 #pragma mark UITextView Delegate Methods
 
-- (void)textViewDidBeginEditing:(UITextView *)textView {
+- (void)textViewDidBeginEditing:(UITextView *)textView
+{
     self.textPromptLabel.hidden = YES;
 }
 
-- (void)textViewDidEndEditing:(UITextView *)aTextView {
+- (void)textViewDidEndEditing:(UITextView *)aTextView
+{
     if ([_textView.text isEqualToString:@""]) {
         self.textPromptLabel.hidden = NO;
     }
+}
+
+#pragma mark - WPTableImageSource Delegate
+
+- (void)tableImageSource:(WPTableImageSource *)tableImageSource imageReady:(UIImage *)image forIndexPath:(NSIndexPath *)indexPath
+{
+    [self.postView setFeaturedImage:image];
 }
 
 @end

@@ -4,6 +4,8 @@
 @class ReaderPost;
 @class ReaderTopic;
 
+extern NSString * const ReaderPostServiceErrorDomain;
+
 @interface ReaderPostService : NSObject<LocalCoreDataService>
 
 /**
@@ -14,7 +16,7 @@
  @param failure block called if there is any error. `error` can be any underlying network error.
  */
 - (void)fetchPostsForTopic:(ReaderTopic *)topic
-                   success:(void (^)(BOOL hasMore))success
+                   success:(void (^)(NSInteger count, BOOL hasMore))success
                    failure:(void (^)(NSError *error))failure;
 
 /**
@@ -27,7 +29,7 @@
  */
 - (void)fetchPostsForTopic:(ReaderTopic *)topic
                earlierThan:(NSDate *)date
-                   success:(void (^)(BOOL hasMore))success
+                   success:(void (^)(NSInteger count, BOOL hasMore))success
                    failure:(void (^)(NSError *error))failure;
 
 /**
@@ -51,7 +53,7 @@
  @param failure block called if there is any error. `error` can be any underlying network error.
  */
 - (void)backfillPostsForTopic:(ReaderTopic *)topic
-                      success:(void (^)(BOOL hasMore))success
+                      success:(void (^)(NSInteger count, BOOL hasMore))success
                       failure:(void (^)(NSError *error))failure;
 
 /**
@@ -90,5 +92,32 @@
               note:(NSString *)note
            success:(void (^)())success
            failure:(void (^)(NSError *error))failure;
+
+/**
+ Deletes all posts that do not belong to a ReaderTopic
+ Saves the NSManagedObjectContext.
+ */
+- (void)deletePostsWithNoTopic;
+
+/**
+ Delete posts from the specified site/feed from the specified topic
+ 
+ @param siteID The id of the site or feed.
+ @param siteURL The URL of the site or feed.
+ @param topic The `ReaderTopic` owning the posts.
+ */
+- (void)deletePostsWithSiteID:(NSNumber *)siteID
+                   andSiteURL:(NSString *)siteURL
+                    fromTopic:(ReaderTopic *)topic;
+
+/**
+ Delete posts from the specified site (not feed)
+
+ @param siteID The id of the site or feed.
+ */
+
+- (void)deletePostsFromSiteWithID:(NSNumber *)siteID;
+
+- (void)flagPostsFromSite:(NSNumber *)siteID asBlocked:(BOOL)blocked;
 
 @end

@@ -39,34 +39,36 @@
 # * Chinese (Taiwan) [zh-Hant]
 
 LANGS={
-  'da' => 'da', # Danish
-  'de' => 'de', # German
-  'es' => 'es', # Spanish
-  'fr' => 'fr', # French
-  'he' => 'he', # Hebrew
-  'hr' => 'hr', # Croatian
-  'hu' => 'hu', # Hungarian
-  'id' => 'id', # Indonesian
-  'it' => 'it', # Italian
-  'ja' => 'ja', # Japanese
-  'ko' => 'ko', # Korean
-  'nb' => 'nb', # Norwegian (Bokmål)
-  'nl' => 'nl', # Dutch
-  'pl' => 'pl', # Polish
-  'pt' => 'pt', # Portuguese
-  'ru' => 'ru', # Russian
-  'sv' => 'sv', # Swedish
-  'th' => 'th', # Thai
-  'tr' => 'tr', # Turkish
-  'zh-cn' => 'zh-Hans', # Chinese (Chine)
-  'zh-tw' => 'zh-Hant' # Chinese (Taiwan)
+  'da' => 'da',         # Danish
+  'de' => 'de',         # German
+  'es' => 'es',         # Spanish
+  'fr' => 'fr',         # French
+  'he' => 'he',         # Hebrew
+  'hr' => 'hr',         # Croatian
+  'hu' => 'hu',         # Hungarian
+  'id' => 'id',         # Indonesian
+  'it' => 'it',         # Italian
+  'ja' => 'ja',         # Japanese
+  'ko' => 'ko',         # Korean
+  'nb' => 'nb',         # Norwegian (Bokmål)
+  'nl' => 'nl',         # Dutch
+  'pl' => 'pl',         # Polish
+  'pt' => 'pt',         # Portuguese
+  'ru' => 'ru',         # Russian
+  'sv' => 'sv',         # Swedish
+  'th' => 'th',         # Thai
+  'tr' => 'tr',         # Turkish
+  'zh-cn' => 'zh-Hans', # Chinese (China)
+  'zh-tw' => 'zh-Hant', # Chinese (Taiwan)
+  'pt-br' => 'pt-BR',   # Portuguese (Brazil)
+  'en-gb' => 'en-GB',   # English (UK)
 }
 
 LANGS.each do |code,local|
   lang_dir = File.join('WordPress', 'Resources', "#{local}.lproj")
   puts "Updating #{code}"
   system "cp #{lang_dir}/Localizable.strings #{lang_dir}/Localizable.strings.bak"
-  system "curl -so #{lang_dir}/Localizable.strings http://translate.wordpress.org/projects/ios/dev/#{code}/default/export-translations?format=strings" or begin
+  system "curl -so #{lang_dir}/Localizable.strings https://translate.wordpress.org/projects/ios/dev/#{code}/default/export-translations?format=strings" or begin
     puts "Error downloading #{code}"
   end
   system "php fix-translation.php #{lang_dir}/Localizable.strings"

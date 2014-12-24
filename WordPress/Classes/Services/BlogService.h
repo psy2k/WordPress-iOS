@@ -1,12 +1,20 @@
 #import <Foundation/Foundation.h>
 #import "LocalCoreDataService.h"
 
-@class Blog, WPAccount;
+@class Blog;
+@class WPAccount;
 
 @interface BlogService : NSObject <LocalCoreDataService>
 
+
+/**
+ Returns the blog that matches with a given blogID
+ */
 - (Blog *)blogByBlogId:(NSNumber *)blogID;
 
+/**
+ Stores the blog's URL in NSUserDefaults, for later retrieval
+ */
 - (void)flagBlogAsLastUsed:(Blog *)blog;
 
 /**
@@ -37,28 +45,10 @@
  */
 - (Blog *)firstWPComBlog;
 
-/*! Sync only blog posts, categories, options and post formats.
- *  Used for instances where comments and pages aren't necessarily needed to be updated.
- *
- *  \param success Completion block called if the operation was a success
- *  \param failure Completion block called if the operation was a failure
- */
-- (void)syncPostsAndMetadataForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
 
-/*! Sync only blog posts (no metadata lists)
- *  Used for instances where comments and pages aren't necessarily needed to be updated.
- *
- *  \param success  Completion block called if the operation was a success
- *  \param failure  Completion block called if the operation was a failure
- *  \param more     If posts already exist then sync an additional batch
- */
-- (void)syncPostsForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure loadMore:(BOOL)more;
+- (void)syncBlogsForAccount:(WPAccount *)account success:(void (^)())success failure:(void (^)(NSError *error))failure;
 
-- (void)syncPagesForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure loadMore:(BOOL)more;
-- (void)syncCategoriesForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
 - (void)syncOptionsForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
-- (void)syncCommentsForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
-- (void)syncMediaLibraryForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
 - (void)syncPostFormatsForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
 
 /*! Syncs an entire blog include posts, pages, comments, options, post formats and categories.
@@ -79,5 +69,32 @@
 
 - (NSArray *)blogsForAllAccounts;
 
+/*! Determine timezone for blog from blog options.  If no timezone information is stored on
+ *  the device, then assume GMT+0 is the default.
+ *  
+ *  \param blog     The blog/site to determine the timezone for.
+ */
+- (NSTimeZone *)timeZoneForBlog:(Blog *)blog;
+
+///--------------------
+/// @name Blog creation
+///--------------------
+
+/**
+ Searches for a `Blog` object for this account with the given XML-RPC endpoint
+
+ @param xmlrpc the XML-RPC endpoint URL as a string
+ @param account the account the blog belongs to
+ @return the blog if one was found, otherwise it returns nil
+ */
+- (Blog *)findBlogWithXmlrpc:(NSString *)xmlrpc inAccount:(WPAccount *)account;
+
+/**
+ Creates a blank `Blog` object for this account
+
+ @param account the account the blog belongs to
+ @return the newly created blog
+ */
+- (Blog *)createBlogWithAccount:(WPAccount *)account;
 
 @end

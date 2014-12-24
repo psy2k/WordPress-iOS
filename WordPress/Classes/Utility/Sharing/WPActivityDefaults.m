@@ -4,6 +4,7 @@
 #import "InstapaperActivity.h"
 #import "PocketActivity.h"
 #import "GooglePlusActivity.h"
+#import "WordPressActivity.h"
 
 @implementation WPActivityDefaults
 
@@ -13,8 +14,9 @@
     InstapaperActivity *instapaperActivity = [[InstapaperActivity alloc] init];
     PocketActivity *pocketActivity = [[PocketActivity alloc] init];
     GooglePlusActivity *googlePlusActivity = [[GooglePlusActivity alloc] init];
+    WordPressActivity *wordPressActivity = [[WordPressActivity alloc] init];
 
-    return @[safariActivity, instapaperActivity, pocketActivity, googlePlusActivity];
+    return @[safariActivity, wordPressActivity, instapaperActivity, pocketActivity, googlePlusActivity];
 }
 
 + (void)trackActivityType:(NSString *)activityType
@@ -36,11 +38,15 @@
         stat = WPAnalyticsStatSentItemToPocket;
     } else if ([activityType isEqualToString:NSStringFromClass([GooglePlusActivity class])]) {
         stat = WPAnalyticsStatSentItemToGooglePlus;
+    } else if ([activityType isEqualToString:NSStringFromClass([WordPressActivity class])]) {
+        stat = WPAnalyticsStatSentItemToWordPress;
+    } else if ([activityType isEqualToString:UIActivityTypeCopyToPasteboard] || [activityType isEqualToString:UIActivityTypeAddToReadingList] || [activityType isEqualToString:NSStringFromClass([SafariActivity class])]) {
+        return;
     } else {
         [WPAnalytics track:WPAnalyticsStatSharedItem];
         return;
     }
-    
+
     if (stat != WPAnalyticsStatNoStat) {
         [WPAnalytics track:WPAnalyticsStatSharedItem];
         [WPAnalytics track:stat];

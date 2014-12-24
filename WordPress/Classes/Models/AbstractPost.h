@@ -28,9 +28,18 @@
 - (BOOL)hasCategories;
 - (BOOL)hasTags;
 
-+ (AbstractPost *)newDraftForBlog:(Blog *)blog;
-+ (NSString *const)remoteUniqueIdentifier;
-+ (void)mergeNewPosts:(NSArray *)newObjects forBlog:(Blog *)blog;
-- (void)updateFromDictionary:(NSDictionary *)postInfo;
+/**
+ *  @brief      Call this method to know whether this post has a revision or not.
+ *
+ *  @returns    YES if this post has a revision, NO otherwise.
+ */
+- (BOOL)hasRevision;
+
+/**
+ *  @brief      Call this method to know whether this post has unsaved changes or not.
+ *
+ *  @returns    YES if the post has unsaved changes.  NO otherwise.
+ */
+- (BOOL)hasUnsavedChanges;
 
 @end
