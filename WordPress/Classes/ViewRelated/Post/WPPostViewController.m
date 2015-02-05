@@ -10,33 +10,38 @@
 #import <WordPressCom-Analytics-iOS/WPAnalytics.h>
 #import <AMPopTip/AMPopTip.h>
 #import <SVProgressHUD.h>
-#import "ContextManager.h"
-#import "Post.h"
-#import "Coordinate.h"
-#import "Media.h"
-#import "WPTableViewCell.h"
 #import "BlogSelectorViewController.h"
-#import "WPBlogSelectorButton.h"
-#import "LocationService.h"
 #import "BlogService.h"
+#import "ContextManager.h"
+#import "Coordinate.h"
+#import "EditImageDetailsViewController.h"
+#import "LocationService.h"
+#import "Media.h"
 #import "MediaBrowserViewController.h"
 #import "MediaService.h"
+#import "NSString+Helpers.h"
+#import "Post.h"
 #import "PostPreviewViewController.h"
 #import "PostService.h"
 #import "PostSettingsViewController.h"
-#import "NSString+Helpers.h"
-#import "WPMediaUploader.h"
-#import "WPButtonForNavigationBar.h"
-#import "WPUploadStatusButton.h"
-#import "WordPressAppDelegate.h"
 #import "PrivateSiteURLProtocol.h"
+#import "WordPressAppDelegate.h"
+#import "WPButtonForNavigationBar.h"
+#import "WPBlogSelectorButton.h"
+#import "WPButtonForNavigationBar.h"
 #import "WPMediaProgressTableViewController.h"
 #import "WPProgressTableViewCell.h"
+#import "WPTableViewCell.h"
+#import "WPTabBarController.h"
+#import "WPUploadStatusButton.h"
+#import "WordPress-Swift.h"
 
 typedef NS_ENUM(NSInteger, EditPostViewControllerAlertTag) {
     EditPostViewControllerAlertTagNone,
     EditPostViewControllerAlertTagLinkHelper,
     EditPostViewControllerAlertTagFailedMedia,
+    EditPostViewControllerAlertTagFailedMediaBeforeEdit,
+    EditPostViewControllerAlertTagFailedMediaBeforeSave,
     EditPostViewControllerAlertTagSwitchBlogs,
     EditPostViewControllerAlertCancelMediaUpload,
 };
@@ -47,6 +52,7 @@ static NSString* const WPPostViewControllerEditModeRestorationKey = @"WPPostView
 static NSString* const WPPostViewControllerOwnsPostRestorationKey = @"WPPostViewControllerOwnsPostRestorationKey";
 static NSString* const WPPostViewControllerPostRestorationKey = @"WPPostViewControllerPostRestorationKey";
 static NSString* const WPProgressImageId = @"WPProgressImageId";
+static NSString* const WPProgressMedia = @"WPProgressMedia";
 
 NSString* const kUserDefaultsNewEditorAvailable = @"kUserDefaultsNewEditorAvailable";
 NSString* const kUserDefaultsNewEditorEnabled = @"kUserDefaultsNewEditorEnabled";
@@ -64,15 +70,20 @@ NSString *const kWPEditorConfigURLParamAvailable = @"available";
 NSString *const kWPEditorConfigURLParamEnabled = @"enabled";
 
 static NSInteger const MaximumNumberOfPictures = 10;
-static NSUInteger const WPPostViewControllerSaveOnExitActionSheetTag = 201;
-static NSUInteger const WPPostViewControllerCancelUploadActionSheetTag = 202;
+
+NS_ENUM(NSUInteger, WPPostViewControllerActionSheet) {
+    WPPostViewControllerActionSheetSaveOnExit = 201,
+    WPPostViewControllerActionSheetCancelUpload = 202,
+    WPPostViewControllerActionSheetRetryUpload = 203
+};
+
 static CGFloat const SpacingBetweeenNavbarButtons = 20.0f;
 static CGFloat const RightSpacingOnExitNavbarButton = 5.0f;
 static NSDictionary *DisabledButtonBarStyle;
 static NSDictionary *EnabledButtonBarStyle;
 
 static void *ProgressObserverContext = &ProgressObserverContext;
-@interface WPPostViewController ()<CTAssetsPickerControllerDelegate, UIActionSheetDelegate, UIPopoverControllerDelegate, UITextFieldDelegate, UITextViewDelegate, UIViewControllerRestoration>
+@interface WPPostViewController ()<CTAssetsPickerControllerDelegate, UIActionSheetDelegate, UIPopoverControllerDelegate, UITextFieldDelegate, UITextViewDelegate, UIViewControllerRestoration, EditImageDetailsViewControllerDelegate>
 
 #pragma mark - Misc properties
 @property (nonatomic, strong) UIButton *blogPickerButton;
@@ -80,11 +91,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 @property (nonatomic, strong) UIPopoverController *blogSelectorPopover;
 @property (nonatomic) BOOL dismissingBlogPicker;
 @property (nonatomic) CGPoint scrollOffsetRestorePoint;
-@property (nonatomic, strong) NSProgress * mediaProgress;
-@property (nonatomic, strong) NSMutableArray *childrenMediaProgress;
-@property (nonatomic, strong) NSMutableArray *mediaInProgress;
+@property (nonatomic, strong) NSProgress * mediaGlobalProgress;
+@property (nonatomic, strong) NSMutableDictionary *mediaInProgress;
 @property (nonatomic, strong) UIProgressView *mediaProgressView;
-@property (nonatomic, strong) UIPopoverController *mediaProgressPopover;
 @property (nonatomic, strong) NSString * selectedImageId;
 
 #pragma mark - Bar Button Items
@@ -120,8 +129,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)dealloc
 {
     _failedMediaAlertView.delegate = nil;
-    [_mediaProgress removeObserver:self forKeyPath:NSStringFromSelector(@selector(fractionCompleted))];
-    _mediaProgressPopover.delegate = nil;
+    [_mediaGlobalProgress removeObserver:self forKeyPath:NSStringFromSelector(@selector(fractionCompleted))];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [PrivateSiteURLProtocol unregisterPrivateSiteURLProtocol];
 }
@@ -165,10 +173,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     NSAssert([post isKindOfClass:[AbstractPost class]],
              @"There should be no issues in creating a draft post.");
     
-    _ownsPost = YES;
+    if (self = [self initWithPost:post mode:kWPPostViewControllerModeEdit]) {
+        _ownsPost = YES;
+    }
     
-    return [self initWithPost:post
-                         mode:kWPPostViewControllerModeEdit];
+    return self;
 }
 
 - (instancetype)initWithPost:(AbstractPost *)post
@@ -497,8 +506,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)configureMediaUpload
 {
-    self.mediaInProgress = [NSMutableArray array];
-    self.childrenMediaProgress = [NSMutableArray array];
+    self.mediaInProgress = [NSMutableDictionary dictionary];
     self.mediaProgressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];
 }
 
@@ -661,8 +669,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)showCancelMediaUploadPrompt
 {
-    UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Cancel Media Uploads", "Dialog box title for when the user is cancelling an upload.")
-                                                        message:NSLocalizedString(@"You are currently uploading media. This action will cancel uploads in progress.\n\nAre you sure?", @"This prompt is displayed when the user attempts to stop media uploads in the post editor.")
+    UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Cancel images uploads", "Dialog box title for when the user is cancelling an upload.")
+                                                        message:NSLocalizedString(@"You are currently uploading images. This action will cancel uploads in progress.\n\nAre you sure?", @"This prompt is displayed when the user attempts to stop images uploads in the post editor.")
                                                        delegate:self
                                               cancelButtonTitle:NSLocalizedString(@"Not Now", "Nicer dialog answer for \"No\".")
                                               otherButtonTitles:NSLocalizedString(@"Yes", "Yes"), nil];
@@ -670,35 +678,39 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [alertView show];
 }
 
-- (void)showFailedMediaAlert
-{
-    if (self.failedMediaAlertView)
-        return;
-    self.failedMediaAlertView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Pending media", @"Title for alert when trying to publish a post with failed media items")
-                                                       message:NSLocalizedString(@"There are media items in this post that aren't uploaded to the server. Do you want to continue?", @"")
-                                                      delegate:self
-                                             cancelButtonTitle:NSLocalizedString(@"No", @"")
-                                             otherButtonTitles:NSLocalizedString(@"Post anyway", @""), nil];
-    self.failedMediaAlertView.tag = EditPostViewControllerAlertTagFailedMedia;
-    [self.failedMediaAlertView show];
-}
-
 - (void)showMediaUploadingAlert
 {
     //the post is using the network connection and cannot be stoped, show a message to the user
-    UIAlertView *blogIsCurrentlyBusy = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Uploading media", @"Title for alert when trying to save/exit a post before media upload process is complete.")
-                                                                  message:NSLocalizedString(@"You are currently uploading media. Please wait until this completes.", @"This is a notification the user receives if they are trying to save a post (or exit) before the media upload process is complete.")
+    UIAlertView *blogIsCurrentlyBusy = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Uploading images", @"Title for alert when trying to save/exit a post before image upload process is complete.")
+                                                                  message:NSLocalizedString(@"You are currently uploading images. Please wait until this completes.", @"This is a notification the user receives if they are trying to save a post (or exit) before the image upload process is complete.")
                                                                  delegate:nil
                                                         cancelButtonTitle:NSLocalizedString(@"OK", @"")
                                                         otherButtonTitles:nil];
     [blogIsCurrentlyBusy show];
 }
 
-- (void)cancelMediaUploads
+- (void)showFailedMediaRemovalAlert
 {
-    [self.mediaProgress cancel];
-    [self.mediaInProgress removeAllObjects];
-    [self refreshNavigationBarButtons:NO];
+    UIAlertView * failedMediaAlertView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Uploads failed", @"Title for alert when trying to save post with failed media items")
+                                                                              message:NSLocalizedString(@"Some images uploads failed. This action will remove all failed images from the post.\nSave anyway?", @"Confirms with the user if they save the post all images that failed to upload will be removed from it.")
+                                                                             delegate:self
+                                                                    cancelButtonTitle:NSLocalizedString(@"Not Now", @"")
+                                                                    otherButtonTitles:NSLocalizedString(@"Yes", @""), nil];
+    failedMediaAlertView.tag = EditPostViewControllerAlertTagFailedMediaBeforeSave;
+    [failedMediaAlertView show];
+
+    
+}
+
+- (void)showFailedMediaBeforeEditAlert
+{
+    UIAlertView * failedMediaBeforeEditAlertView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Uploads failed", @"Title for alert when trying to edit html post with failed media items")
+                                                           message:NSLocalizedString(@"Some images uploads failed. Switching to the HTML view of this post will remove failed media.\nSwitch anyway?", @"Confirms with the user if they manually edit the post HTML all images that failed to upload will be removed from it.")
+                                                          delegate:self
+                                                 cancelButtonTitle:NSLocalizedString(@"Not Now", @"")
+                                                 otherButtonTitles:NSLocalizedString(@"Yes", @""), nil];
+    failedMediaBeforeEditAlertView.tag = EditPostViewControllerAlertTagFailedMediaBeforeEdit;
+    [failedMediaBeforeEditAlertView show];
 }
 
 - (void)showSettings
@@ -763,7 +775,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [self.editorView saveSelection];
     [self.editorView.focusedField blur];
 	
-    if ([self hasChanges]) {
+    if ([self.post hasUnsavedChanges]) {
         [self showPostHasChangesActionSheet];
     } else {
         [self stopEditing];
@@ -797,7 +809,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                                          otherButtonTitles:NSLocalizedString(@"Update Draft", @"Button shown if there are unsaved changes and the author is trying to move away from an already published/saved post."), nil];
     }
     
-    actionSheet.tag = WPPostViewControllerSaveOnExitActionSheetTag;
+    actionSheet.tag = WPPostViewControllerActionSheetSaveOnExit;
     actionSheet.actionSheetStyle = UIActionSheetStyleAutomatic;
     if (IS_IPAD) {
         [actionSheet showFromBarButtonItem:self.cancelButton animated:YES];
@@ -827,6 +839,34 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     [defaults setBool:isEnabled forKey:kUserDefaultsNewEditorEnabled];
     [defaults synchronize];
+    
+    if (isEnabled) {
+        [WPAnalytics track:WPAnalyticsStatEditorEnabledNewVersion];
+    } else {
+        // TODO: (Diego Rey Mendez) re-enable the following line once this issue is fixed
+        //
+        //  https://github.com/wordpress-mobile/WordPress-iOS/issues/3165
+        //
+        // IMPORTANT: the reason this code was changed without a proper PR is that it was breaking
+        // builds.
+        //
+        //[WPAnalytics track:WPAnalyticsStatEditorDisabledNewVersion];
+    }
+}
+
++ (BOOL)makeNewEditorAvailable
+{
+    BOOL result = NO;
+    BOOL newVisualEditorNotAvailable = ![WPPostViewController isNewEditorAvailable];
+    
+    if (newVisualEditorNotAvailable) {
+        
+        result = YES;
+        [WPPostViewController setNewEditorAvailable:YES];
+        [WPPostViewController setNewEditorEnabled:YES];
+    }
+    
+    return result;
 }
 
 + (BOOL)isNewEditorAvailable
@@ -923,9 +963,14 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     return title;
 }
 
-- (BOOL)hasChanges
+- (NSInteger)currentBlogCount
 {
-    return [self.post hasChanged];
+    NSInteger blogCount = 0;
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+    blogCount = [blogService blogCountForAllAccounts];
+    
+    return blogCount;
 }
 
 #pragma mark - UI Manipulation
@@ -947,30 +992,23 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)refreshNavigationBarLeftButtons:(BOOL)editingChanged
 {
     UIBarButtonItem *secondaryleftHandButton = self.secondaryLeftUIBarButtonItem;
+    NSArray* leftBarButtons;
     
     if ([self isEditing] && !self.post.hasRemote) {
         // Editing a new post
         [self.navigationItem setLeftBarButtonItems:nil];
-        NSArray* leftBarButtons;
-        if (secondaryleftHandButton) {
-            leftBarButtons = @[self.negativeSeparator, self.cancelXButton, secondaryleftHandButton];
-        } else {
-            leftBarButtons = @[self.negativeSeparator, self.cancelXButton];
-        }
+        leftBarButtons = @[self.negativeSeparator, self.cancelXButton, secondaryleftHandButton];
         [self.navigationItem setLeftBarButtonItems:leftBarButtons animated:NO];
     } else if ([self isEditing] && self.post.hasRemote) {
         // Editing an existing post (draft or published)
         [self.navigationItem setLeftBarButtonItems:nil];
-        NSArray* leftBarButtons;
-        if (secondaryleftHandButton) {
-            leftBarButtons = @[self.negativeSeparator, self.cancelChevronButton, secondaryleftHandButton];
-        } else {
-            leftBarButtons = @[self.negativeSeparator, self.cancelChevronButton];
-        }
+        leftBarButtons = @[self.negativeSeparator, self.cancelChevronButton, secondaryleftHandButton];
         [self.navigationItem setLeftBarButtonItems:leftBarButtons animated:NO];
 	} else {
+        // Previewing a post (no edit)
         [self.navigationItem setLeftBarButtonItems:nil];
-        [self.navigationItem setLeftBarButtonItem:self.navigationItem.backBarButtonItem animated:NO];
+        leftBarButtons = @[self.negativeSeparator, self.cancelChevronButton, secondaryleftHandButton];
+        [self.navigationItem setLeftBarButtonItems:leftBarButtons];
 	}
 }
 
@@ -987,7 +1025,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
             self.saveBarButtonItem.title = [self saveBarButtonItemTitle];
         }
 
-		BOOL updateEnabled = self.hasChanges || self.post.remoteStatus == AbstractPostRemoteStatusFailed;
+		BOOL updateEnabled = [self.post canSave];
+        
 		[self.navigationItem.rightBarButtonItem setEnabled:updateEnabled];		
 	} else {
 		NSArray* rightBarButtons = @[self.editBarButtonItem,
@@ -1063,6 +1102,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     cancelButton.rightSpacing = RightSpacingOnExitNavbarButton;
     
     UIBarButtonItem *button = [[UIBarButtonItem alloc] initWithCustomView:cancelButton];
+    button.accessibilityLabel = NSLocalizedString(@"Cancel", @"Action button to close editor and cancel changes or insertion of post");
     _cancelButton = button;
     return _cancelButton;
 }
@@ -1079,6 +1119,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     
     UIBarButtonItem *button = [[UIBarButtonItem alloc] initWithCustomView:cancelButton];
     _cancelButton = button;
+    button.accessibilityLabel = NSLocalizedString(@"Cancel", @"Action button to close edior and cancel changes or insertion of post");
 	return _cancelButton;
 }
 
@@ -1136,6 +1177,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         button.removeDefaultLeftSpacing = YES;
         button.leftSpacing = SpacingBetweeenNavbarButtons / 2.0f;
         _previewBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:button];
+        _previewBarButtonItem.accessibilityLabel = NSLocalizedString(@"Preview", @"Action button to preview the content of post or page on the  live site");
     }
 	
 	return _previewBarButtonItem;
@@ -1186,24 +1228,27 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 {
     UIBarButtonItem *aUIButtonBarItem;
     
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    NSInteger blogCount = [blogService blogCountForAllAccounts];
-    
     if ([self isMediaUploading]) {
         aUIButtonBarItem = [[UIBarButtonItem alloc] initWithCustomView:self.uploadStatusButton];
-    } else if(blogCount <= 1 || ![self isPostLocal] || [[WordPressAppDelegate sharedWordPressApplicationDelegate] isNavigatingMeTab]) {
-        aUIButtonBarItem = nil;
     } else {
-        UIButton *blogButton = self.blogPickerButton;
+        WPBlogSelectorButton *blogButton = (WPBlogSelectorButton*)self.blogPickerButton;
         NSString *blogName = [self.post.blog.blogName length] == 0 ? self.post.blog.url : self.post.blog.blogName;
         NSMutableAttributedString *titleText = [[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@", blogName]
-                                                                                      attributes:@{ NSFontAttributeName : [WPFontManager openSansBoldFontOfSize:14.0] }];
+                                                                                      attributes:@{ NSFontAttributeName : [WPFontManager openSansSemiBoldFontOfSize:16.0] }];
         
         [blogButton setAttributedTitle:titleText forState:UIControlStateNormal];
         if (IS_IPAD) {
             //size to fit here so the iPad popover works properly
             [blogButton sizeToFit];
+        }
+        
+        // The blog picker is read-only if one of the following is true:
+        // editor screen is in preview mode, there is only 1 blog, or the user
+        // is editing an existing post
+        if (self.currentBlogCount <= 1 || !self.isEditing || (self.isEditing && self.post.hasRemote)) {
+            blogButton.isReadOnly = YES;
+        } else {
+            blogButton.isReadOnly = NO;
         }
         aUIButtonBarItem = [[UIBarButtonItem alloc] initWithCustomView:blogButton];
     }
@@ -1330,12 +1375,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 		return;
 	}
     
-    if ([self hasFailedMedia]) {
-        [self showFailedMediaAlert];
-        return;
-    }
-    
-    [self stopEditing];
 	[self savePostAndDismissVC];
 }
 
@@ -1344,7 +1383,12 @@ static void *ProgressObserverContext = &ProgressObserverContext;
  */
 - (void)savePostAndDismissVC
 {
-	[self savePost];
+    if ([self hasFailedMedia]) {
+        [self showFailedMediaRemovalAlert];
+        return;
+    }
+    [self stopEditing];
+    [self savePost];
     [self dismissEditView];
 }
 
@@ -1399,7 +1443,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)didSaveNewPost
 {
     if ([self isPostLocal]) {
-        [[WordPressAppDelegate sharedWordPressApplicationDelegate] switchTabToPostsListForPost:self.post];
+        [[WPTabBarController sharedInstance] switchTabToPostsListForPost:self.post];
     }
 }
 
@@ -1477,111 +1521,177 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 #pragma mark - Media State Methods
 
+- (NSString*)uniqueIdForMedia
+{
+    NSUUID * uuid = [[NSUUID alloc] init];
+    return [uuid UUIDString];
+}
+
+- (void)refreshMediaProgress
+{
+    self.mediaProgressView.hidden = ![self isMediaUploading];
+    float fractionOfUploadsCompleted = (float)(self.mediaGlobalProgress.completedUnitCount+1)/(float)self.mediaGlobalProgress.totalUnitCount;
+    self.mediaProgressView.progress = MIN(fractionOfUploadsCompleted ,self.mediaGlobalProgress.fractionCompleted);
+    for(NSProgress * progress in [self.mediaInProgress allValues]){
+        if (progress.totalUnitCount != 0 && !progress.cancelled){
+            [self.editorView setProgress:progress.fractionCompleted onImage:progress.userInfo[WPProgressImageId]];
+        }
+    }
+}
+
 - (BOOL)hasFailedMedia
 {
-	BOOL hasFailedMedia = NO;
-    
-	NSSet *mediaFiles = self.post.media;
-	for (Media *media in mediaFiles) {
-		if(media.remoteStatus == MediaRemoteStatusFailed) {
-			hasFailedMedia = YES;
-			break;
-		}
-	}
-	mediaFiles = nil;
-    
-	return hasFailedMedia;
+    __block BOOL hasFailedMedia = NO;
+    [self.mediaInProgress enumerateKeysAndObjectsUsingBlock:^(NSString * key, NSProgress * progress, BOOL *stop) {
+        if (progress.totalUnitCount == 0){
+            hasFailedMedia = YES;
+        }
+    }];
+    return hasFailedMedia;
 }
 
 - (BOOL)isMediaUploading
 {
-	BOOL mediaStillInProgress = NO;
-	
-    // First check to see if media is being uploaded
-	NSSet *mediaFiles = self.post.media;
-	for (Media *media in mediaFiles) {
-		if(media.remoteStatus == MediaRemoteStatusPushing) {
-			mediaStillInProgress = YES;
-			break;
-		}
-	}
-	mediaFiles = nil;
-    
-    // If media is not begin uploaded, check to see if we are waiting on the remote URLs
-    if (!mediaStillInProgress) {
-        mediaStillInProgress =  (self.mediaInProgress && self.mediaInProgress.count > 0);
-    }
-    
-	return mediaStillInProgress;
+    return (self.mediaGlobalProgress.totalUnitCount > self.mediaGlobalProgress.completedUnitCount) && !self.mediaGlobalProgress.cancelled;
 }
 
-- (void)removeFromMediaInProgress:(NSString *)uniqueMediaId
+- (void)cancelMediaUploads
 {
-    NSAssert(uniqueMediaId != nil, @"uniqueMediaId should not be nil here.");
-    if(uniqueMediaId && self.mediaInProgress.count > 0)
-    {
-        [self.mediaInProgress removeObject:uniqueMediaId];
+    [self.mediaGlobalProgress cancel];
+    NSMutableArray * keys = [NSMutableArray array];
+    [self.mediaInProgress enumerateKeysAndObjectsUsingBlock:^(NSString * key, NSProgress * progress, BOOL *stop) {
+        if (progress.isCancelled){
+            [self.editorView removeImage:key];
+            [keys addObject:key];
+        }
+    }];
+    [self.mediaInProgress removeObjectsForKeys:keys];
+    [self autosaveContent];
+    [self refreshNavigationBarButtons:NO];
+}
+
+- (void)cancelUploadOfMediaWithId:(NSString *)uniqueMediaId
+{
+    NSProgress * progress = self.mediaInProgress[uniqueMediaId];
+    if (!progress) {
+        return;
+    }
+    [progress cancel];
+}
+
+- (void)removeAllFailedMedia
+{
+    NSMutableArray * keys = [NSMutableArray array];
+    [self.mediaInProgress enumerateKeysAndObjectsUsingBlock:^(NSString * key, NSProgress * progress, BOOL *stop) {
+        if (progress.totalUnitCount == 0){
+            [self.editorView removeImage:key];
+            [keys addObject:key];
+        }
+    }];
+    [self.mediaInProgress removeObjectsForKeys:keys];
+    [self autosaveContent];
+}
+
+- (void)stopTrackingProgressOfMediaWithId:(NSString *)uniqueMediaId
+{
+    NSParameterAssert(uniqueMediaId != nil);
+    if (!uniqueMediaId) {
+        return;
+    }
+    NSProgress * progress = self.mediaInProgress[uniqueMediaId];
+    [self.mediaInProgress removeObjectForKey:uniqueMediaId];
+    if (progress.isCancelled){
+        //on iOS 7 cancelled sub progress don't update the parent progress properly so we need to do it
+        if ( ![UIDevice isOS8] ) {
+            self.mediaGlobalProgress.completedUnitCount++;
+        }
+    }
+    [self dismissAssociatedActionSheetIfVisible:uniqueMediaId];
+}
+
+- (void)dismissAssociatedActionSheetIfVisible:(NSString *)uniqueMediaId {
+    // let's see if we where displaying an action sheet for this image
+    if (self.currentActionSheet && [uniqueMediaId isEqualToString:self.selectedImageId]){
+        if (self.currentActionSheet.tag == WPPostViewControllerActionSheetCancelUpload ||
+            self.currentActionSheet.tag == WPPostViewControllerActionSheetRetryUpload ) {
+            [self.currentActionSheet dismissWithClickedButtonIndex:self.currentActionSheet.cancelButtonIndex animated:YES];
+        }
     }
 }
 
-- (void)addToMediaInProgress:(NSString *)uniqueMediaId
+- (void)trackMediaWithId:(NSString *)uniqueMediaId usingProgress:(NSProgress *)progress
 {
-    NSAssert(uniqueMediaId != nil, @"uniqueMediaId should not be nil here.");
-    if(uniqueMediaId)
-    {
-        [self.mediaInProgress addObject:uniqueMediaId];
+    NSParameterAssert(uniqueMediaId != nil);
+    if (!uniqueMediaId) {
+        return;
     }
+    
+    self.mediaInProgress[uniqueMediaId] = progress;
 }
 
-- (void)showMediaProgress
+- (void)prepareMediaProgressForNumberOfAssets:(NSUInteger)count
 {
-    if (IS_IPAD && self.blogSelectorPopover.isPopoverVisible) {
-        [self.blogSelectorPopover dismissPopoverAnimated:YES];
-        self.blogSelectorPopover = nil;
+    if (self.mediaGlobalProgress.isCancelled ||
+        self.mediaGlobalProgress.completedUnitCount >= self.mediaGlobalProgress.totalUnitCount){
+        [self.mediaGlobalProgress removeObserver:self forKeyPath:NSStringFromSelector(@selector(fractionCompleted))];
+        self.mediaGlobalProgress = nil;
     }
     
-    WPMediaProgressTableViewController *vc = [[WPMediaProgressTableViewController alloc] initWithMasterProgress:self.mediaProgress childrenProgress:self.childrenMediaProgress];
-    
-    vc.title = NSLocalizedString(@"Media Uploading", @"Title for view that shows progress of multiple uploads");
-    
-    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
-    navController.navigationBar.translucent = NO;
-    navController.navigationBar.barStyle = UIBarStyleBlack;
-    
-    if (IS_IPAD) {
-        vc.preferredContentSize = CGSizeMake(320.0, 500);
-        self.mediaProgressPopover = [[UIPopoverController alloc] initWithContentViewController:navController];
-        self.mediaProgressPopover.delegate = self;
-        [self.mediaProgressPopover presentPopoverFromBarButtonItem:self.secondaryLeftUIBarButtonItem permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
-        
+    if (!self.mediaGlobalProgress){
+        self.mediaGlobalProgress = [[NSProgress alloc] initWithParent:[NSProgress currentProgress]
+                                                             userInfo:nil];
+        self.mediaGlobalProgress.totalUnitCount = count;
+        [self.mediaGlobalProgress addObserver:self
+                                   forKeyPath:NSStringFromSelector(@selector(fractionCompleted))
+                                      options:NSKeyValueObservingOptionInitial
+                                      context:ProgressObserverContext];
     } else {
-        navController.modalPresentationStyle = UIModalPresentationPageSheet;
-        navController.modalTransitionStyle = UIModalTransitionStyleCoverVertical;
-        
-        [self presentViewController:navController animated:YES completion:nil];
+        self.mediaGlobalProgress.totalUnitCount += count;
     }
 }
 
-- (void) addMediaAssets:(NSArray *)assets {
+- (void)retryUploadOfMediaWithId:(NSString *)imageUniqueId
+{
+    [WPAnalytics track:WPAnalyticsStatEditorUploadMediaRetried];
     
-    if (self.mediaProgress.isCancelled || self.mediaProgress.completedUnitCount >= self.mediaProgress.totalUnitCount){
-        [self.mediaProgress removeObserver:self forKeyPath:NSStringFromSelector(@selector(fractionCompleted))];
-        self.mediaProgress = nil;
-        [self.childrenMediaProgress removeAllObjects];
+    NSProgress * progress = self.mediaInProgress[imageUniqueId];
+    if (!progress) {
+        return;
     }
-    
-    if (!self.mediaProgress){
-        self.mediaProgress = [[NSProgress alloc] initWithParent:[NSProgress currentProgress]
-                                                       userInfo:nil];
-        self.mediaProgress.totalUnitCount = assets.count;
-        [self.mediaProgress addObserver:self
-                             forKeyPath:NSStringFromSelector(@selector(fractionCompleted))
-                                options:NSKeyValueObservingOptionInitial
-                                context:ProgressObserverContext];
-    } else {
-        self.mediaProgress.totalUnitCount += assets.count;
+    Media * media = progress.userInfo[WPProgressMedia];
+    if (!media) {
+        return;
     }
+    [self prepareMediaProgressForNumberOfAssets:1];
     
+    MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
+    [self.mediaGlobalProgress becomeCurrentWithPendingUnitCount:1];
+    NSProgress *uploadProgress = nil;
+    [mediaService uploadMedia:media progress:&uploadProgress success:^{
+        [WPAnalytics track:WPAnalyticsStatEditorAddedPhotoViaLocalLibrary];
+        [self.editorView replaceLocalImageWithRemoteImage:media.remoteURL uniqueId:imageUniqueId];
+        [self stopTrackingProgressOfMediaWithId:imageUniqueId];
+        [self refreshNavigationBarButtons:NO];
+    } failure:^(NSError *error) {
+        if (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled) {
+            [self stopTrackingProgressOfMediaWithId:imageUniqueId];
+            [self.editorView removeImage:imageUniqueId];
+            [media remove];
+        } else {
+            [self dismissAssociatedActionSheetIfVisible:imageUniqueId];
+            self.mediaGlobalProgress.completedUnitCount++;
+            [self.editorView markImage:imageUniqueId failedUploadWithMessage:NSLocalizedString(@"Failed", @"The message that is overlay on media when the upload to server fails")];
+        }        
+    }];
+    [uploadProgress setUserInfoObject:imageUniqueId forKey:WPProgressImageId];
+    [uploadProgress setUserInfoObject:media forKey:WPProgressMedia];
+    [self trackMediaWithId:imageUniqueId usingProgress:uploadProgress];
+    [self.mediaGlobalProgress resignCurrent];
+}
+
+- (void)addMediaAssets:(NSArray *)assets {
+    
+    [self prepareMediaProgressForNumberOfAssets:assets.count];
     
     for (ALAsset *asset in assets) {
         if ([[asset valueForProperty:ALAssetPropertyType] isEqualToString:ALAssetTypeVideo]) {
@@ -1589,43 +1699,50 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         } else if ([[asset valueForProperty:ALAssetPropertyType] isEqualToString:ALAssetTypePhoto]) {
             MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
             __weak __typeof__(self) weakSelf = self;
-            NSString* imageUniqueId = [self uniqueId];
-            [self addToMediaInProgress:imageUniqueId];
-            
+            NSString* imageUniqueId = [self uniqueIdForMedia];
+            NSProgress *createMediaProgress = [[NSProgress alloc] initWithParent:nil userInfo:nil];
+            createMediaProgress.totalUnitCount = 2;
+            [self trackMediaWithId:imageUniqueId usingProgress:createMediaProgress];
             [mediaService createMediaWithAsset:asset forPostObjectID:self.post.objectID completion:^(Media *media, NSError * error) {
                 __typeof__(self) strongSelf = weakSelf;
-                if (strongSelf) {
-                    if (error) {
-                        [WPError showAlertWithTitle:NSLocalizedString(@"Failed to export media", @"The title for an alert that says to the user the media (image or video) he selected couldn't be used on the post.") message:error.localizedDescription];
-                        return;
-                    }
-                    NSURL* url = [[NSURL alloc] initFileURLWithPath:media.localURL];
-                    
-                    [strongSelf.editorView insertLocalImage:[url absoluteString] uniqueId:imageUniqueId];
-                    [strongSelf.mediaProgress becomeCurrentWithPendingUnitCount:1];
-                    NSProgress *uploadProgress = nil;
-                    [mediaService uploadMedia:media progress:&uploadProgress success:^{
-                        [strongSelf.editorView replaceLocalImageWithRemoteImage:media.remoteURL uniqueId:imageUniqueId];
-                        [strongSelf removeFromMediaInProgress:imageUniqueId];
-                        [strongSelf refreshNavigationBarButtons:NO];
-                    } failure:^(NSError *error) {
-                        [strongSelf removeFromMediaInProgress:imageUniqueId];
-                        strongSelf.mediaProgress.totalUnitCount++;
-                        if (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled) {
-                            [strongSelf.editorView removeImage:imageUniqueId];
-                            [media remove];
-                        } else {
-                            [strongSelf.editorView markImageUploadFailed:imageUniqueId];
-                            [WPError showAlertWithTitle:NSLocalizedString(@"Media upload failed", @"The title for an alert that says to the user the media (image or video) failed to be uploaded to the server.") message:error.localizedDescription];
-                        }
-                        [strongSelf refreshNavigationBarButtons:NO];
-                    }];
-                    UIImage * image = [UIImage imageWithCGImage:asset.thumbnail];
-                    [uploadProgress setUserInfoObject:image forKey:WPProgressImageThumbnailKey];
-                    [uploadProgress setUserInfoObject:imageUniqueId forKey:WPProgressImageId];
-                    [strongSelf.childrenMediaProgress addObject:uploadProgress];
-                    [strongSelf.mediaProgress resignCurrent];
+                if (!strongSelf) {
+                    return;
                 }
+                createMediaProgress.completedUnitCount++;
+                if (error) {
+                    [WPError showAlertWithTitle:NSLocalizedString(@"Failed to export media", @"The title for an alert that says to the user the media (image or video) he selected couldn't be used on the post.") message:error.localizedDescription];
+                    return;
+                }
+                NSURL* url = [[NSURL alloc] initFileURLWithPath:media.localURL];
+                [strongSelf.editorView insertLocalImage:[url absoluteString] uniqueId:imageUniqueId];
+                
+                [strongSelf.mediaGlobalProgress becomeCurrentWithPendingUnitCount:1];
+                NSProgress *uploadProgress = nil;
+                [mediaService uploadMedia:media progress:&uploadProgress success:^{
+                    [WPAnalytics track:WPAnalyticsStatEditorAddedPhotoViaLocalLibrary];
+                    [strongSelf.editorView replaceLocalImageWithRemoteImage:media.remoteURL uniqueId:imageUniqueId];
+                    [strongSelf stopTrackingProgressOfMediaWithId:imageUniqueId];
+                    [strongSelf refreshNavigationBarButtons:NO];
+                } failure:^(NSError *error) {
+                    if (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled) {
+                        [strongSelf stopTrackingProgressOfMediaWithId:imageUniqueId];
+                        [strongSelf.editorView removeImage:imageUniqueId];
+                        [strongSelf autosaveContent];
+                        [media remove];
+                    } else {
+                        [self dismissAssociatedActionSheetIfVisible:imageUniqueId];
+                        [WPAnalytics track:WPAnalyticsStatEditorUploadMediaFailed];
+                        strongSelf.mediaGlobalProgress.completedUnitCount++;
+                        [strongSelf.editorView markImage:imageUniqueId failedUploadWithMessage:NSLocalizedString(@"Failed", @"The message that is overlay on media when the upload to server fails")];                            
+                    }
+                    [strongSelf refreshNavigationBarButtons:NO];
+                }];
+                UIImage * image = [UIImage imageWithCGImage:asset.thumbnail];
+                [uploadProgress setUserInfoObject:image forKey:WPProgressImageThumbnailKey];
+                [uploadProgress setUserInfoObject:imageUniqueId forKey:WPProgressImageId];
+                [uploadProgress setUserInfoObject:media forKey:WPProgressMedia];
+                [strongSelf trackMediaWithId:imageUniqueId usingProgress:uploadProgress];
+                [strongSelf.mediaGlobalProgress resignCurrent];
             }];
         }
     }
@@ -1721,20 +1838,36 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 #pragma mark - AlertView Delegate Methods
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
-    if (alertView.tag == EditPostViewControllerAlertTagFailedMedia) {
-        if (buttonIndex == 1) {
-            DDLogInfo(@"Saving post even after some media failed to upload");
-			[self savePostAndDismissVC];
-        }
-        self.failedMediaAlertView = nil;
-    } else if (alertView.tag == EditPostViewControllerAlertTagSwitchBlogs) {
-        if (buttonIndex == 1) {
-            [self showBlogSelector];
-        }
-    } else if (alertView.tag == EditPostViewControllerAlertCancelMediaUpload) {
-        if (buttonIndex == 1) {
-            [self cancelMediaUploads];
-        }
+    switch(alertView.tag){
+        case (EditPostViewControllerAlertTagFailedMedia): {
+            if (buttonIndex == alertView.firstOtherButtonIndex) {
+                DDLogInfo(@"Saving post even after some media failed to upload");
+                [self savePostAndDismissVC];
+            }
+            self.failedMediaAlertView = nil;
+        } break;
+        case (EditPostViewControllerAlertTagSwitchBlogs): {
+            if (buttonIndex == alertView.firstOtherButtonIndex) {
+                [self showBlogSelector];
+            }
+        } break;
+        case (EditPostViewControllerAlertCancelMediaUpload): {
+            if (buttonIndex == alertView.firstOtherButtonIndex) {
+                [self cancelMediaUploads];
+            }
+        } break;
+        case (EditPostViewControllerAlertTagFailedMediaBeforeEdit): {
+            if (buttonIndex == alertView.firstOtherButtonIndex) {
+                [self removeAllFailedMedia];
+                [self.editorView showHTMLSource];
+            }
+        } break;
+        case (EditPostViewControllerAlertTagFailedMediaBeforeSave): {
+            if (buttonIndex == alertView.firstOtherButtonIndex) {
+                [self removeAllFailedMedia];
+                [self savePostAndDismissVC];
+            }
+        } break;
     }
     
     return;
@@ -1747,20 +1880,33 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 - (void)actionSheet:(UIActionSheet *)actionSheet didDismissWithButtonIndex:(NSInteger)buttonIndex {
-    if ([actionSheet tag] == WPPostViewControllerSaveOnExitActionSheetTag) {
-        if (buttonIndex == actionSheet.destructiveButtonIndex) {
-            [self actionSheetDiscardButtonPressed];
-        } else if (buttonIndex == actionSheet.cancelButtonIndex) {
-            [self actionSheetKeepEditingButtonPressed];
-        } else if (buttonIndex == actionSheet.firstOtherButtonIndex) {
-            [self actionSheetSaveDraftButtonPressed];
-        }
-    }
-    if ([actionSheet tag] == WPPostViewControllerCancelUploadActionSheetTag) {
-        if (buttonIndex == actionSheet.destructiveButtonIndex){
-            [self.editorView removeImage:self.selectedImageId];
-        }
-        self.selectedImageId = nil;
+    
+    switch ([actionSheet tag]){
+        case(WPPostViewControllerActionSheetSaveOnExit): {
+            if (buttonIndex == actionSheet.destructiveButtonIndex) {
+                [self actionSheetDiscardButtonPressed];
+            } else if (buttonIndex == actionSheet.cancelButtonIndex) {
+                [self actionSheetKeepEditingButtonPressed];
+            } else if (buttonIndex == actionSheet.firstOtherButtonIndex) {
+                [self actionSheetSaveDraftButtonPressed];
+            }
+        } break;
+        case (WPPostViewControllerActionSheetCancelUpload): {
+            if (buttonIndex == actionSheet.destructiveButtonIndex){
+                [self cancelUploadOfMediaWithId:self.selectedImageId];
+            }
+            self.selectedImageId = nil;
+        } break;
+        case (WPPostViewControllerActionSheetRetryUpload): {
+            if (buttonIndex == actionSheet.destructiveButtonIndex){
+                [self stopTrackingProgressOfMediaWithId:self.selectedImageId];
+                [self.editorView removeImage:self.selectedImageId];
+            } else if (buttonIndex == 1) {
+                [self.editorView unmarkImageFailedUpload:self.selectedImageId];
+                [self retryUploadOfMediaWithId:self.selectedImageId];
+            }
+            self.selectedImageId = nil;
+        } break;
     }
     
     _currentActionSheet = nil;
@@ -1781,8 +1927,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)actionSheetSaveDraftButtonPressed
 {
-    [self stopEditing];
-    
     if (![self.post hasRemote] && [self.post.status isEqualToString:@"publish"]) {
         self.post.status = @"draft";
     }
@@ -1829,6 +1973,12 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self showMediaUploadingAlert];
         return NO;        
     }
+    
+    if ([self hasFailedMedia]) {
+        [self showFailedMediaBeforeEditAlert];
+        return NO;
+    }
+    
     return YES;
 }
 
@@ -1852,31 +2002,64 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [self refreshUIForCurrentPost];
 }
 
-- (void)editorViewController:(WPEditorViewController *)editorViewController imageTapped:(NSString *)imageId url:(NSURL *)url
+- (void)editorViewController:(WPEditorViewController *)editorViewController imageTapped:(NSString *)imageId url:(NSURL *)url imageMeta:(WPImageMeta *)imageMeta
 {
-    if (imageId.length == 0){
-        return;
-    }
-    if ([self.mediaInProgress containsObject:imageId]){
-        UIActionSheet * actionSheet = [[UIActionSheet alloc] initWithTitle:nil
-                                                                  delegate:self
-                                                         cancelButtonTitle:NSLocalizedString(@"Cancel",@"User action to not cancel upload")
-                                                    destructiveButtonTitle:NSLocalizedString(@"Stop Upload",@"User action to stop upload")otherButtonTitles:nil];
-        actionSheet.tag = WPPostViewControllerCancelUploadActionSheetTag;
-        [actionSheet showInView:self.view];
-        self.selectedImageId= imageId;
+    // Note: imageId is an editor specified data attribute, not the image's ID attribute.
+    if (imageId.length == 0) {
+        [self displayImageDetailsForMeta:imageMeta];
+    } else {
+        [self promptForActionForTappedImage:imageId url:url];
     }
 }
 
-#pragma mark - Generating unique IDs
-
-- (NSString*)uniqueId
+- (void)displayImageDetailsForMeta:(WPImageMeta *)imageMeta
 {
-    CFUUIDRef uuidRef = CFUUIDCreate(NULL);
-    CFStringRef uuidStringRef = CFUUIDCreateString(NULL, uuidRef);
-    CFRelease(uuidRef);
+    [WPAnalytics track:WPAnalyticsStatEditorEditedImage];
     
-    return (__bridge_transfer NSString *)uuidStringRef;
+    EditImageDetailsViewController *controller = [EditImageDetailsViewController controllerForDetails:imageMeta forPost:self.post];
+    controller.delegate = self;
+
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:controller];
+    navController.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:navController animated:YES completion:nil];
+}
+
+- (void)promptForActionForTappedImage:(NSString *)imageId url:(NSURL *)url
+{
+    if (imageId.length == 0) {
+        return;
+    }
+    
+    self.selectedImageId= imageId;
+    
+    NSProgress * mediaProgress = self.mediaInProgress[imageId];
+    if (!mediaProgress){
+        // The image is already uploaded so nothing to here, but in the future we could plug in image actions here
+        return;
+    }
+
+    //Are we showing another action sheet?
+    if (self.currentActionSheet != nil){
+        return;
+    }
+    
+    // Is upload still going?
+    if (mediaProgress.completedUnitCount < mediaProgress.totalUnitCount) {
+        UIActionSheet * actionSheet = [[UIActionSheet alloc] initWithTitle:nil
+                                                                  delegate:self
+                                                         cancelButtonTitle:NSLocalizedString(@"Cancel", @"User action to dismiss stop upload question")
+                                                    destructiveButtonTitle:NSLocalizedString(@"Stop Upload",@"User action to stop upload")otherButtonTitles:nil];
+        actionSheet.tag = WPPostViewControllerActionSheetCancelUpload;
+        [actionSheet showInView:self.editorView];
+    } else {
+        UIActionSheet * actionSheet = [[UIActionSheet alloc] initWithTitle:nil
+                                                                  delegate:self
+                                                         cancelButtonTitle:NSLocalizedString(@"Cancel", @"User action to dismiss retry upload question")
+                                                    destructiveButtonTitle:NSLocalizedString(@"Remove Image", @"User action to remove image that failed upload")
+                                                         otherButtonTitles:NSLocalizedString(@"Retry Upload", @"User action to retry upload the image"), nil];
+        actionSheet.tag = WPPostViewControllerActionSheetRetryUpload;
+        [actionSheet showInView:self.editorView];        
+    }
 }
 
 #pragma mark - CTAssetsPickerControllerDelegate
@@ -1891,16 +2074,27 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (BOOL)assetsPickerController:(CTAssetsPickerController *)picker shouldSelectAsset:(ALAsset *)asset
 {
     if ([asset valueForProperty:ALAssetPropertyType] == ALAssetTypePhoto) {
-        return picker.selectedAssets.count < MaximumNumberOfPictures;
-    } else {
+        // If the image is from a shared photo stream it may not be available locally to be used
+        if (!asset.defaultRepresentation) {
+            [WPError showAlertWithTitle:NSLocalizedString(@"Cannot select this image", @"The title for an alert that says the image the user selected isn't available.")
+                                message:NSLocalizedString(@"This image belongs to a Photo Stream and is not available at the moment to be added to your site. Try opening it full screen in the Photos app before trying to using it again.", @"User information explaining that the image is not available locally. This is normally related to share photo stream images.")  withSupportButton:NO];
+            return NO;
+        }
+        if (picker.selectedAssets.count >= MaximumNumberOfPictures) {
+            [WPError showAlertWithTitle:nil
+                                message:[NSString stringWithFormat:NSLocalizedString(@"You can only add %i photos at a time.", @"User information explaining that you can only select an x number of images."), MaximumNumberOfPictures] withSupportButton:NO];
+            return NO;
+        }
         return YES;
+    } else {
+        return NO;
     }
 }
 
 #pragma mark - KVO
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {    
-    if (context == ProgressObserverContext && object == self.mediaProgress) {
+    if (context == ProgressObserverContext && object == self.mediaGlobalProgress) {
         [[NSOperationQueue mainQueue] addOperationWithBlock:^{
             [self refreshNavigationBarButtons:NO];
         }];
@@ -1909,17 +2103,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
 }
 
-#pragma mark - Media Progress
+#pragma mark - EditImageDetailsViewControllerDelegate
 
-- (void) refreshMediaProgress
+- (void)editImageDetailsViewController:(EditImageDetailsViewController *)controller didFinishEditingImageDetails:(WPImageMeta *)imageMeta
 {
-    self.mediaProgressView.hidden = ![self isMediaUploading];
-    self.mediaProgressView.progress = MIN((float)(self.mediaProgress.completedUnitCount+1)/(float)self.mediaProgress.totalUnitCount,self.mediaProgress.fractionCompleted);
-    for(NSProgress * progress in self.childrenMediaProgress){
-        if (!(progress.totalUnitCount == 0) && !progress.cancelled){
-            [self.editorView setProgress:progress.fractionCompleted onImage:progress.userInfo[WPProgressImageId]];
-        }
-    }
+    [self.editorView updateCurrentImageMeta:imageMeta];
 }
 
 @end

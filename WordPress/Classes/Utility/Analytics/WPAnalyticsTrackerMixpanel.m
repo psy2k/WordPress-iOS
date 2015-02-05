@@ -8,6 +8,7 @@
 #import "Blog.h"
 #import "BlogService.h"
 #import "WPAnalyticsTrackerMixpanel.h"
+#import "AccountServiceRemoteREST.h"
 
 @implementation WPAnalyticsTrackerMixpanel
 
@@ -99,14 +100,14 @@ NSString *const EmailAddressRetrievedKey = @"email_address_retrieved";
         return;
     }
 
-    [[defaultAccount restApi] getUserDetailsWithSuccess:^(AFHTTPRequestOperation *operation, id responseObject) {
-        NSDictionary *response = (NSDictionary *)responseObject;
-        if ([[response stringForKey:@"email"] length] > 0) {
-            [[Mixpanel sharedInstance].people set:@"$email" to:[response stringForKey:@"email"]];
+    AccountServiceRemoteREST *remote = [[AccountServiceRemoteREST alloc] initWithApi:defaultAccount.restApi];
+    [remote getDetailsWithSuccess:^(NSDictionary *userDetails) {
+        if ([[userDetails stringForKey:@"email"] length] > 0) {
+            [[Mixpanel sharedInstance].people set:@"$email" to:[userDetails stringForKey:@"email"]];
             [userDefaults setBool:YES forKey:EmailAddressRetrievedKey];
             [userDefaults synchronize];
         }
-    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+    } failure:^(NSError *error) {
         DDLogError(@"Failed to retrieve /me endpoint");
     }];
 }
@@ -293,6 +294,16 @@ NSString *const EmailAddressRetrievedKey = @"email_address_retrieved";
             [instructions setSuperPropertyAndPeoplePropertyToIncrement:@"number_of_times_scrolled_to_bottom_of_stats"];
             [instructions setCurrentDateForPeopleProperty:@"last_time_scrolled_to_bottom_of_stats"];
             break;
+        case WPAnalyticsStatEditorUploadMediaFailed:
+            instructions = [WPAnalyticsTrackerMixpanelInstructionsForStat mixpanelInstructionsForEventName:@"Editor - Upload Media Failed"];
+            [instructions setSuperPropertyAndPeoplePropertyToIncrement:@"number_of_times_editor_upload_media_failed"];
+            [instructions setCurrentDateForPeopleProperty:@"last_time_editor_upload_media_failed"];
+            break;
+        case WPAnalyticsStatEditorUploadMediaRetried:
+            instructions = [WPAnalyticsTrackerMixpanelInstructionsForStat mixpanelInstructionsForEventName:@"Editor - Retried Uploading Media"];
+            [instructions setSuperPropertyAndPeoplePropertyToIncrement:@"number_of_times_editor_retried_uploading_media"];
+            [instructions setCurrentDateForPeopleProperty:@"last_time_editor_retried_uploading_media"];
+            break;
         case WPAnalyticsStatEditorCreatedPost:
             instructions = [WPAnalyticsTrackerMixpanelInstructionsForStat mixpanelInstructionsForEventName:@"Editor - Created Post"];
             [instructions setSuperPropertyAndPeoplePropertyToIncrement:@"number_of_times_editor_created_post"];
@@ -397,6 +408,11 @@ NSString *const EmailAddressRetrievedKey = @"email_address_retrieved";
             [instructions setSuperPropertyAndPeoplePropertyToIncrement:@"number_of_times_editor_saved_draft"];
             [instructions setCurrentDateForPeopleProperty:@"last_time_saved_draft"];
             break;
+        case WPAnalyticsStatEditorEditedImage:
+            instructions = [WPAnalyticsTrackerMixpanelInstructionsForStat mixpanelInstructionsForEventName:@"Editor - Edited Image"];
+            [instructions setSuperPropertyAndPeoplePropertyToIncrement:@"number_of_times_editor_edited_image"];
+            [instructions setCurrentDateForPeopleProperty:@"last_time_edited_image"];
+            break;
         case WPAnalyticsStatNotificationsAccessed:
             instructions = [WPAnalyticsTrackerMixpanelInstructionsForStat mixpanelInstructionsForEventName:@"Notifications - Accessed"];
             [instructions setSuperPropertyAndPeoplePropertyToIncrement:@"number_of_times_accessed_notifications"];
@@ -437,6 +453,17 @@ NSString *const EmailAddressRetrievedKey = @"email_address_retrieved";
             instructions = [WPAnalyticsTrackerMixpanelInstructionsForStat mixpanelInstructionsForEventName:@"Editor - Enabled New Version"];
             [instructions addSuperPropertyToFlag:@"enabled_new_editor"];
             break;
+            // TODO: (Diego Rey Mendez) re-enable the following lines once this issue is fixed
+            //
+            //  https://github.com/wordpress-mobile/WordPress-iOS/issues/3165
+            //
+            // IMPORTANT: the reason this code was changed without a proper PR is that it was breaking
+            // builds.
+            //
+            //case WPAnalyticsStatEditorDisabledNewVersion:
+            //  instructions = [WPAnalyticsTrackerMixpanelInstructionsForStat mixpanelInstructionsForEventName:@"Editor - Disabled New Version"];
+            //  [instructions addSuperPropertyToFlag:@"disabled_new_editor"];
+            //  break;
         case WPAnalyticsStatSharedItemViaEmail:
             instructions = [WPAnalyticsTrackerMixpanelInstructionsForStat mixpanelInstructionsWithSuperPropertyAndPeoplePropertyIncrementor:@"number_of_items_shared_via_email"];
             [instructions setCurrentDateForPeopleProperty:@"last_time_shared_item_via_email"];

@@ -268,7 +268,7 @@ NSString * const PostServiceErrorDomain = @"PostServiceErrorDomain";
         } else {
             request = [NSFetchRequest fetchRequestWithEntityName:NSStringFromClass([Post class])];
         }
-        request.predicate = [NSPredicate predicateWithFormat:@"(remoteStatusNumber = %@) AND (postID != NULL) AND (original == NULL) AND (blog = %@)", @(AbstractPostRemoteStatusSync), blog];
+        request.predicate = [NSPredicate predicateWithFormat:@"(remoteStatusNumber = %@) AND (postID != NULL) AND (original == NULL) AND (revision == NULL) AND (blog = %@)", @(AbstractPostRemoteStatusSync), blog];
         NSArray *existingPosts = [self.managedObjectContext executeFetchRequest:request error:nil];
         NSMutableSet *postsToDelete = [NSMutableSet setWithArray:existingPosts];
         [postsToDelete minusSet:postsToKeep];
@@ -301,6 +301,7 @@ NSString * const PostServiceErrorDomain = @"PostServiceErrorDomain";
     post.status = remotePost.status;
     post.password = remotePost.password;
     post.post_thumbnail = remotePost.postThumbnailID;
+    post.authorAvatarURL = remotePost.authorAvatarURL;
 
     if (remotePost.postID != previousPostID) {
         [self updateCommentsForPost:post];
@@ -311,7 +312,6 @@ NSString * const PostServiceErrorDomain = @"PostServiceErrorDomain";
         pagePost.parentID = remotePost.parentID;
     } else if ([post isKindOfClass:[Post class]]) {
         Post *postPost = (Post *)post;
-        postPost.authorAvatarURL = remotePost.authorAvatarURL;
         postPost.postFormat = remotePost.format;
         postPost.tags = [remotePost.tags componentsJoinedByString:@","];
         [self updatePost:postPost withRemoteCategories:remotePost.categories];
@@ -348,12 +348,14 @@ NSString * const PostServiceErrorDomain = @"PostServiceErrorDomain";
     RemotePost *remotePost = [RemotePost new];
     remotePost.postID = post.postID;
     remotePost.date = post.date_created_gmt;
-    remotePost.title = post.postTitle;
+    remotePost.title = post.postTitle ?: @"";
     remotePost.content = post.content;
     remotePost.status = post.status;
     remotePost.postThumbnailID = post.post_thumbnail;
     remotePost.password = post.password;
     remotePost.type = @"post";
+    remotePost.authorAvatarURL = post.authorAvatarURL;
+
     if ([post isKindOfClass:[Page class]]) {
         Page *pagePost = (Page *)post;
         remotePost.parentID = pagePost.parentID;
@@ -361,7 +363,6 @@ NSString * const PostServiceErrorDomain = @"PostServiceErrorDomain";
     }
     if ([post isKindOfClass:[Post class]]) {
         Post *postPost = (Post *)post;
-        remotePost.authorAvatarURL = postPost.authorAvatarURL;
         remotePost.format = postPost.postFormat;
         remotePost.tags = [postPost.tags componentsSeparatedByString:@","];
         remotePost.categories = [self remoteCategoriesForPost:postPost];

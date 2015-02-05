@@ -156,7 +156,7 @@
 - (RemotePost *)remotePostFromJSONDictionary:(NSDictionary *)jsonPost {
     RemotePost *post = [RemotePost new];
     post.postID = jsonPost[@"ID"];
-    post.siteID = jsonPost[@"siteID"];
+    post.siteID = jsonPost[@"site_ID"];
     post.authorAvatarURL = jsonPost[@"author"][@"avatar_URL"];
     post.authorDisplayName = jsonPost[@"author"][@"name"];
     post.authorEmail = [jsonPost[@"author"] stringForKey:@"email"];
@@ -200,8 +200,16 @@
 
 - (NSDictionary *)parametersWithRemotePost:(RemotePost *)post
 {
+    NSParameterAssert(post.title != nil);
+    NSParameterAssert(post.content != nil);
     NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
-    parameters[@"title"] = post.title;
+    
+    if (post.title) {
+        parameters[@"title"] = post.title;
+    } else {
+        parameters[@"title"] = @"";
+    }
+    
     parameters[@"content"] = post.content;
     parameters[@"status"] = post.status;
     parameters[@"password"] = post.password ? post.password : @"";

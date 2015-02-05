@@ -237,8 +237,6 @@ File.open(path) do |f|
       lookback_token = v.chomp
     elsif k == "APPBOTX_API_KEY"
       appbotx_api_key = v.chomp
-    else
-      $stderr.puts "warning: Unknown key #{k}"
     end
   end
 end

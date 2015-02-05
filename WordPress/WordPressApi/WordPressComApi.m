@@ -6,7 +6,7 @@
 #import "WordPressAppDelegate.h"
 #import "NotificationsManager.h"
 
-static NSString *const WordPressComApiClientEndpointURL = @"https://public-api.wordpress.com/rest/v1/";
+static NSString *const WordPressComApiClientEndpointURL = @"https://public-api.wordpress.com/rest/v1.1/";
 static NSString *const WordPressComApiOauthBaseUrl = @"https://public-api.wordpress.com/oauth2";
 NSString *const WordPressComApiNotificationFields = @"id,type,unread,body,subject,timestamp,meta";
 static NSString *const WordPressComApiLoginUrl = @"https://wordpress.com/wp-login.php";
@@ -577,12 +577,6 @@ NSString *const WordPressComApiPushAppId = @"org.wordpress.appstore";
 }
 
 #pragma mark - User Details
-
-- (void)getUserDetailsWithSuccess:(WordPressComApiRestSuccessResponseBlock)success failure:(WordPressComApiRestSuccessFailureBlock)failure
-{
-    NSString *path = @"me";
-    [self GET:path parameters:nil success:success failure:failure];
-}
 
 - (void)setAuthorizationHeaderWithToken:(NSString *)token {
 	[self.requestSerializer setValue:[NSString stringWithFormat:@"Bearer %@", token]
