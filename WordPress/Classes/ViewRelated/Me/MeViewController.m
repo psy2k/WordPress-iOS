@@ -17,6 +17,7 @@
 #import "WPAccount.h"
 #import "LoginViewController.h"
 #import <WordPress-iOS-Shared/WPTableViewCell.h>
+#import <WordPress-iOS-Shared/WPTableViewSectionHeaderView.h>
 #import "HelpshiftUtils.h"
 
 const typedef enum {
@@ -38,21 +39,69 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) MeHeaderView *headerView;
-@property (nonatomic, strong) UILabel *helpshiftBadgeLabel;
 
 @end
 
 @implementation MeViewController
+
+#pragma mark - LifeCycle Methods
 
 - (void)dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
-- (void)loadView
+- (instancetype)init
 {
-    [super loadView];
+    self = [super init];
+    if (self) {
+        // we want to observe for the account change notification even if the view is not visible
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(defaultAccountDidChange:)
+                                                     name:WPAccountDefaultWordPressComAccountChangedNotification
+                                                   object:nil];
 
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(accountEmailUpdated:)
+                                                     name:WPAccountEmailAndDefaultBlogUpdatedNotification
+                                                   object:nil];
+
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(helpshiftUnreadCountUpdated:)
+                                                     name:HelpshiftUnreadCountUpdatedNotification
+                                                   object:nil];
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+
+    [self buildTableView];
+
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+
+    // we want to keep email and default blog information up to date, this is probably the best place to do it
+    [accountService updateEmailAndDefaultBlogForWordPressComAccount:defaultAccount];
+
+    [self refreshHeaderView];
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [self.navigationController setNavigationBarHidden:NO animated:animated];
+
+    [HelpshiftUtils refreshUnreadNotificationCount];
+}
+
+#pragma mark - View Construction / Configuration
+
+- (void)buildTableView
+{
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleGrouped];
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
@@ -64,13 +113,6 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
     self.headerView = [[MeHeaderView alloc] initWithFrame:CGRectMake(0.0, 0.0, CGRectGetWidth(self.view.bounds), MeHeaderViewHeight)];
 
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
-
-    self.helpshiftBadgeLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 50, 30)];
-    self.helpshiftBadgeLabel.layer.masksToBounds = YES;
-    self.helpshiftBadgeLabel.layer.cornerRadius = 15;
-    self.helpshiftBadgeLabel.textAlignment = NSTextAlignmentCenter;
-    self.helpshiftBadgeLabel.backgroundColor = [WPStyleGuide newKidOnTheBlockBlue];
-    self.helpshiftBadgeLabel.textColor = [UIColor whiteColor];
 
     [self setupAutolayoutConstraints];
 }
@@ -88,32 +130,13 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
                                                                         views:views]];
 }
 
-- (void)viewDidLoad
-{
-    [super viewDidLoad];
+#pragma mark - Header methods
 
-    // we want to observe for the account change notification even if the view is not visible
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(defaultAccountDidChange:)
-                                                 name:WPAccountDefaultWordPressComAccountChangedNotification
-                                               object:nil];
-
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(helpshiftUnreadCountUpdated:)
-                                                 name:HelpshiftUnreadCountUpdatedNotification
-                                               object:nil];
-
-    [self refreshDetails];
-}
-
-- (void)refreshDetails
+- (void)refreshHeaderView
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
     WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-
-    // we want to keep email and default blog information up to date, this is probably the best place to do it
-    [accountService updateEmailAndDefaultBlogForWordPressComAccount:defaultAccount];
 
     if (defaultAccount) {
         self.tableView.tableHeaderView = self.headerView;
@@ -127,12 +150,15 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
     [self.tableView reloadData];
 }
 
-- (void)viewWillAppear:(BOOL)animated
+- (UILabel *)helpshiftBadgeLabel
 {
-    [super viewWillAppear:animated];
-    [self.navigationController setNavigationBarHidden:NO animated:animated];
-
-    [HelpshiftUtils refreshUnreadNotificationCount];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 50, 30)];
+    label.layer.masksToBounds = YES;
+    label.layer.cornerRadius = 15;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.backgroundColor = [WPStyleGuide newKidOnTheBlockBlue];
+    label.textColor = [UIColor whiteColor];
+    return label;
 }
 
 #pragma mark - UITableViewDataSource methods
@@ -171,8 +197,9 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 
                 NSInteger unreadNotificationCount = [HelpshiftUtils unreadNotificationCount];
                 if ([HelpshiftUtils isHelpshiftEnabled] && unreadNotificationCount > 0) {
-                    self.helpshiftBadgeLabel.text = [NSString stringWithFormat:@"%ld", unreadNotificationCount];
-                    cell.accessoryView = self.helpshiftBadgeLabel;
+                    UILabel *label = [self helpshiftBadgeLabel];
+                    label.text = [NSString stringWithFormat:@"%ld", unreadNotificationCount];
+                    cell.accessoryView = label;
                     cell.accessoryType = UITableViewCellAccessoryNone;
                 } else {
                     cell.accessoryView = nil;
@@ -193,18 +220,41 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
             cell.accessoryType = UITableViewCellAccessoryNone;
 
             if (defaultAccount) {
-                NSString *signOutString = NSLocalizedString(@"Sign Out", @"Sign out from WordPress.com");
+                NSString *signOutString = NSLocalizedString(@"Disconnect from WordPress.com",
+                                                            @"Label for disconnecting from WordPress.com account");
                 cell.textLabel.text = signOutString;
                 cell.accessibilityIdentifier = signOutString;
             }
             else {
-                NSString *signInString = NSLocalizedString(@"Sign In", @"Sign in to WordPress.com");
+                NSString *signInString = NSLocalizedString(@"Connect to WordPress.com Account",
+                                                           @"Label for connecting to WordPress.com account");
                 cell.textLabel.text = signInString;
                 cell.accessibilityIdentifier = signInString;
             }
         }
     }
     return cell;
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
+{
+    WPTableViewSectionHeaderView *header = [[WPTableViewSectionHeaderView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.view.bounds), 0)];
+    header.title = [self titleForHeaderInSection:section];
+    return header;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
+{
+    NSString *title = [self titleForHeaderInSection:section];
+    return [WPTableViewSectionHeaderView heightForTitle:title andWidth:CGRectGetWidth(self.view.bounds)];
+}
+
+- (NSString *)titleForHeaderInSection:(NSInteger)section
+{
+    if (section == MeSectionWpCom) {
+        return NSLocalizedString(@"WordPress.com Account", @"WordPress.com sign-in/sign-out section header title");
+    }
+    return nil;
 }
 
 #pragma mark - UITableViewDelegate methods
@@ -233,7 +283,8 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 
             if (defaultAccount) {
                 // Present the Sign out ActionSheet
-                NSString *signOutTitle = NSLocalizedString(@"You are logged in as %@", @"");
+                NSString *signOutTitle = NSLocalizedString(@"Signing out removes all of your sites associated with %@",
+                                                           @"Label for disconnecting WordPress.com account. The %@ is a placeholder for the user's screen name.");
                 signOutTitle = [NSString stringWithFormat:signOutTitle, [defaultAccount username]];
                 UIActionSheet *actionSheet;
                 actionSheet = [[UIActionSheet alloc] initWithTitle:signOutTitle
@@ -284,7 +335,19 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 
 - (void)defaultAccountDidChange:(NSNotification *)notification
 {
-    [self refreshDetails];
+    [self refreshHeaderView];
+}
+
+- (void)accountEmailUpdated:(NSNotification *)notification
+{
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+
+    // check if the updated account is the default WordPress.com account
+    if (defaultAccount == [notification object]) {
+        [self.headerView setGravatarEmail:defaultAccount.email];
+    }
 }
 
 #pragma mark -

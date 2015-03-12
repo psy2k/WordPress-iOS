@@ -20,7 +20,7 @@
 #import "NSString+HTML.h"
 #import "PocketAPI.h"
 #import "ReaderPost.h"
-#import "UIDevice+WordPressIdentifier.h"
+#import "UIDevice+Helpers.h"
 #import "WordPressComApiCredentials.h"
 #import "WPAccount.h"
 #import "AccountService.h"
@@ -41,12 +41,13 @@
 #import "WPWhatsNew.h"
 #import "LoginViewController.h"
 #import "NotificationsViewController.h"
-#import "ReaderPostsViewController.h"
+#import "ReaderViewController.h"
 #import "SupportViewController.h"
 #import "StatsViewController.h"
 #import "Constants.h"
 #import "UIImage+Util.h"
 #import "NSBundle+VersionNumberHelper.h"
+#import "NSProcessInfo+Util.h"
 
 #import "WPAnalyticsTrackerMixpanel.h"
 #import "WPAnalyticsTrackerWPCom.h"
@@ -81,6 +82,13 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 @property (nonatomic, assign, readwrite) BOOL                           wpcomAvailable;
 @property (nonatomic, assign, readwrite) BOOL                           listeningForBlogChanges;
 @property (nonatomic, strong, readwrite) NSDate                         *applicationOpenedTime;
+
+/**
+ *  @brief      Flag that signals wether Whats New is on screen or not.
+ *  @details    Won't be necessary once WPWhatsNew is changed to inherit from UIViewController
+ *              https://github.com/wordpress-mobile/WordPress-iOS/issues/3218
+ */
+@property (nonatomic, assign, readwrite) BOOL                           wasWhatsNewShown;
 
 @end
 
@@ -119,6 +127,9 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     [self toggleExtraDebuggingIfNeeded];
     [self removeCredentialsForDebug];
 
+    // Stop Storing WordPress.com passwords
+    [self removeWordPressComPassword];
+    
     // Stats and feedback    
     [SupportViewController checkIfFeedbackShouldBeEnabled];
 
@@ -283,9 +294,9 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
                 NSNumber *postId = [params numberForKey:@"postId"];
 
                 WPTabBarController *tabBarController = [WPTabBarController sharedInstance];
-                [tabBarController.readerPostsViewController.navigationController popToRootViewControllerAnimated:NO];
+                [tabBarController.readerViewController.navigationController popToRootViewControllerAnimated:NO];
                 [tabBarController showReaderTab];
-                [tabBarController.readerPostsViewController openPost:postId onBlog:blogId];
+                [tabBarController.readerViewController openPost:postId onBlog:blogId];
                 
                 returnValue = YES;
             }
@@ -516,7 +527,9 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 {
     if ([self noBlogsAndNoWordPressDotComAccount]) {
         UIViewController *presenter = self.window.rootViewController;
-        if (presenter.presentedViewController) {
+        // Check if the presentedVC is UIAlertController because in iPad we show a Sign-out button in UIActionSheet
+        // and it's not dismissed before the check and `dismissViewControllerAnimated` does not work for it
+        if (presenter.presentedViewController && ![presenter.presentedViewController isKindOfClass:[UIAlertController class]]) {
             [presenter dismissViewControllerAnimated:animated completion:^{
                 [self showWelcomeScreenAnimated:animated thenEditor:NO];
             }];
@@ -629,6 +642,11 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 
 - (void)initializeAppTracking
 {
+    // Dont start App Tracking if we are running the test suite
+    if ([NSProcessInfo isRunningTests]) {
+        return;
+    }
+    
     NSString *version = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
     [AppRatingUtility registerSection:@"notifications" withSignificantEventCount:5];
     [AppRatingUtility setSystemWideSignificantEventsCount:10];
@@ -674,6 +692,8 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 
     [Crashlytics setUserName:[defaultAccount username]];
     [self setCommonCrashlyticsParameters];
+
+    [WPAnalytics track:WPAnalyticsStatDefaultAccountChanged];
 }
 
 #pragma mark - Crash reporting
@@ -819,23 +839,21 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     }];
 }
 
-#pragma mark - Networking setup, User agents
+
+
+#pragma mark - User agents
 
 - (void)setupUserAgent
 {
     // Keep a copy of the original userAgent for use with certain webviews in the app.
-    UIWebView *webView = [[UIWebView alloc] init];
-    NSString *defaultUA = [webView stringByEvaluatingJavaScriptFromString:@"navigator.userAgent"];
+    NSString *defaultUA = [[[UIWebView alloc] init] stringByEvaluatingJavaScriptFromString:@"navigator.userAgent"];
+    NSString *wordPressUserAgent = [[UIDevice currentDevice] wordPressUserAgent];
 
-    NSString *appVersion = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
-    [[NSUserDefaults standardUserDefaults] setObject:appVersion forKey:@"version_preference"];
-    NSString *appUA = [NSString stringWithFormat:@"wp-iphone/%@ (%@ %@, %@) Mobile",
-                       appVersion,
-                       [[UIDevice currentDevice] systemName],
-                       [[UIDevice currentDevice] systemVersion],
-                       [[UIDevice currentDevice] model]
-                       ];
-    NSDictionary *dictionary = [[NSDictionary alloc] initWithObjectsAndKeys: appUA, @"UserAgent", defaultUA, @"DefaultUserAgent", appUA, @"AppUserAgent", nil];
+    NSDictionary *dictionary = @{
+        @"UserAgent"        : wordPressUserAgent,
+        @"DefaultUserAgent" : defaultUA,
+        @"AppUserAgent"     : wordPressUserAgent
+    };
     [[NSUserDefaults standardUserDefaults] registerDefaults:dictionary];
 }
 
@@ -854,7 +872,7 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     NSDictionary *dictionary = [[NSDictionary alloc] initWithObjectsAndKeys:ua, @"UserAgent", nil];
     // We have to call registerDefaults else the change isn't picked up by UIWebViews.
     [[NSUserDefaults standardUserDefaults] registerDefaults:dictionary];
-
+    
     DDLogVerbose(@"User-Agent set to: %@", ua);
 }
 
@@ -863,16 +881,18 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     return [[NSUserDefaults standardUserDefaults] objectForKey:@"UserAgent"];
 }
 
+
+#pragma mark - Networking setup
+
 - (void)setupSingleSignOn
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
     WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-
-    if ([defaultAccount username]) {
-        [[WPComOAuthController sharedController] setWordPressComUsername:[defaultAccount username]];
-        [[WPComOAuthController sharedController] setWordPressComPassword:[defaultAccount password]];
-    }
+    WPComOAuthController *oAuthController = [WPComOAuthController sharedController];
+    
+    [oAuthController setWordPressComUsername:defaultAccount.username];
+    [oAuthController setWordPressComAuthToken:defaultAccount.authToken];
 }
 
 - (void)setupReachability
@@ -1043,6 +1063,17 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     DDLogVerbose(@"End keychain fixing");
 }
 
+#pragma mark - WordPress.com Accounts
+
+- (void)removeWordPressComPassword
+{
+    // Nuke WordPress.com stored passwords, since it's no longer required.
+    NSManagedObjectContext *mainContext = [[ContextManager sharedInstance] mainContext];
+    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:mainContext];
+    [accountService removeWordPressComAccountPasswordIfNeeded];
+}
+
+
 #pragma mark - Debugging and logging
 
 - (void)printDebugLaunchInfoWithLaunchOptions:(NSDictionary *)launchOptions
@@ -1065,9 +1096,9 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 #endif
     DDLogInfo(@"Extra debug: %@", extraDebug ? @"YES" : @"NO");
     DDLogInfo(@"Device model: %@ (%@)", [UIDeviceHardware platformString], [UIDeviceHardware platform]);
-    DDLogInfo(@"OS:        %@ %@", [device systemName], [device systemVersion]);
+    DDLogInfo(@"OS:        %@ %@", device.systemName, device.systemVersion);
     DDLogInfo(@"Language:  %@", currentLanguage);
-    DDLogInfo(@"UDID:      %@", [device wordpressIdentifier]);
+    DDLogInfo(@"UDID:      %@", device.wordPressIdentifier);
     DDLogInfo(@"APN token: %@", [NotificationsManager registeredPushNotificationsToken]);
     DDLogInfo(@"Launch options: %@", launchOptions);
 
@@ -1211,8 +1242,6 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 
 - (void)handleDefaultAccountChangedNotification:(NSNotification *)notification
 {
-    [self toggleExtraDebuggingIfNeeded];
-
     // If the notification object is not nil, then it's a login
     if (notification.object) {
         [self loginSimperium];
@@ -1227,11 +1256,16 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
             }
         }];
     } else {
-        // No need to check for welcome screen unless we are signing out
+        if ([self noBlogsAndNoWordPressDotComAccount]) {
+            [WPAnalytics track:WPAnalyticsStatLogout];
+        }
         [self logoutSimperiumAndResetNotifications];
         [self showWelcomeScreenIfNeededAnimated:NO];
         [self removeTodayWidgetConfiguration];
     }
+    
+    [self toggleExtraDebuggingIfNeeded];
+    [self setupSingleSignOn];
 }
 
 #pragma mark - Today Extension
@@ -1258,27 +1292,30 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
  */
 - (void)showWhatsNewIfNeeded
 {
-    BOOL userIsLoggedIn = ![self noBlogsAndNoWordPressDotComAccount];
-    
-    if (userIsLoggedIn) {
-        if ([self mustShowWhatsNewPopup]) {
-            
-            static NSString* const WhatsNewUserDefaultsKey = @"WhatsNewUserDefaultsKey";
-            static const CGFloat WhatsNewShowDelay = 1.0f;
-            
-            NSUserDefaults* userDefaults = [NSUserDefaults standardUserDefaults];
-            
-            BOOL whatsNewAlreadyShown = [userDefaults boolForKey:WhatsNewUserDefaultsKey];
-            
-            if (!whatsNewAlreadyShown) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(WhatsNewShowDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    
-                    WPWhatsNew* whatsNew = [[WPWhatsNew alloc] init];
-                    
-                    [whatsNew show];
-                    
-                    [userDefaults setBool:YES forKey:WhatsNewUserDefaultsKey];
-                });
+    if (!self.wasWhatsNewShown) {
+        BOOL userIsLoggedIn = ![self noBlogsAndNoWordPressDotComAccount];
+        
+        if (userIsLoggedIn) {
+            if ([self mustShowWhatsNewPopup]) {
+                
+                static NSString* const WhatsNewUserDefaultsKey = @"WhatsNewUserDefaultsKey";
+                static const CGFloat WhatsNewShowDelay = 1.0f;
+                
+                NSUserDefaults* userDefaults = [NSUserDefaults standardUserDefaults];
+                
+                BOOL whatsNewAlreadyShown = [userDefaults boolForKey:WhatsNewUserDefaultsKey];
+                
+                if (!whatsNewAlreadyShown) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(WhatsNewShowDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        self.wasWhatsNewShown = YES;
+                        
+                        WPWhatsNew* whatsNew = [[WPWhatsNew alloc] init];
+                        
+                        [whatsNew showWithDismissBlock:^{
+                            [userDefaults setBool:YES forKey:WhatsNewUserDefaultsKey];
+                        }];
+                    });
+                }
             }
         }
     }

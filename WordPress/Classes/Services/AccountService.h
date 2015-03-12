@@ -4,6 +4,7 @@
 @class WPAccount, Blog;
 
 extern NSString *const WPAccountDefaultWordPressComAccountChangedNotification;
+extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
 
 @interface AccountService : NSObject <LocalCoreDataService>
 
@@ -51,13 +52,11 @@ extern NSString *const WPAccountDefaultWordPressComAccountChangedNotification;
  Uses a background managed object context.
  
  @param username the WordPress.com account's username
- @param password the WordPress.com account's password
- @param authToken the OAuth2 token returned by signIntoWordPressDotComWithUsername:password:success:failure:
+ @param authToken the OAuth2 token returned by signIntoWordPressDotComWithUsername:authToken:
  @return a WordPress.com `WPAccount` object for the given `username`
- @see createOrUpdateWordPressComAccountWithUsername:password:authToken:context:
+ @see createOrUpdateWordPressComAccountWithUsername:authToken:
  */
 - (WPAccount *)createOrUpdateWordPressComAccountWithUsername:(NSString *)username
-                                                    password:(NSString *)password
                                                    authToken:(NSString *)authToken;
 
 /**
@@ -92,5 +91,10 @@ extern NSString *const WPAccountDefaultWordPressComAccountChangedNotification;
  @param account WordPress.com WPAccount desired to be updated
  */
 - (void)updateEmailAndDefaultBlogForWordPressComAccount:(WPAccount *)account;
+
+/**
+ Removes your default WordPress.com password from the keychain, if needed.
+ */
+- (void)removeWordPressComAccountPasswordIfNeeded;
 
 @end

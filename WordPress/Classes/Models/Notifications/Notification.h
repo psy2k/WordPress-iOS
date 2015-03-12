@@ -19,6 +19,14 @@ extern NSString * NoteActionReplyKey;
 extern NSString * NoteActionApproveKey;
 extern NSString * NoteActionEditKey;
 
+extern NSString * NoteRangeTypeUser;
+extern NSString * NoteRangeTypePost;
+extern NSString * NoteRangeTypeComment;
+extern NSString * NoteRangeTypeStats;
+extern NSString * NoteRangeTypeBlockquote;
+extern NSString * NoteRangeTypeNoticon;
+extern NSString * NoteRangeTypeSite;
+
 extern NSString * NoteMediaTypeImage;
 
 typedef NS_ENUM(NSInteger, NoteBlockType)
@@ -147,6 +155,7 @@ typedef NS_ENUM(NSInteger, NoteBlockGroupType)
 
 @interface NotificationRange : NSObject
 
+@property (nonatomic, strong, readonly) NSString            *value;
 @property (nonatomic, strong, readonly) NSString            *type;
 @property (nonatomic, strong, readonly) NSURL               *url;
 @property (nonatomic, assign, readonly) NSRange             range;
@@ -161,6 +170,7 @@ typedef NS_ENUM(NSInteger, NoteBlockGroupType)
 @property (nonatomic, assign, readonly) BOOL                isComment;
 @property (nonatomic, assign, readonly) BOOL                isStats;
 @property (nonatomic, assign, readonly) BOOL                isBlockquote;
+@property (nonatomic, assign, readonly) BOOL                isNoticon;
 
 @end
 

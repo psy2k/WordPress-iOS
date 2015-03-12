@@ -2,6 +2,7 @@
 #import <WordPress-iOS-Shared/UIImage+Util.h>
 
 #import "WordPressAppDelegate.h"
+#import "AccountService.h"
 #import "ContextManager.h"
 #import "BlogService.h"
 #import "Blog.h"
@@ -9,14 +10,14 @@
 
 #import "BlogListViewController.h"
 #import "BlogDetailsViewController.h"
-#import "LoginViewController.h"
 #import "MeViewController.h"
 #import "NotificationsViewController.h"
 #import "PostsViewController.h"
-#import "ReaderPostsViewController.h"
+#import "ReaderViewController.h"
 #import "StatsViewController.h"
 #import "WPPostViewController.h"
 #import "WPLegacyEditPageViewController.h"
+#import "WPScrollableViewController.h"
 #import "HelpshiftUtils.h"
 
 NSString * const WPTabBarRestorationID = @"WPTabBarID";
@@ -32,7 +33,7 @@ NSString * const kWPNewPostURLParamImageKey = @"image";
 @interface WPTabBarController () <UITabBarControllerDelegate>
 
 @property (nonatomic, strong) BlogListViewController *blogListViewController;
-@property (nonatomic, strong) ReaderPostsViewController *readerPostsViewController;
+@property (nonatomic, strong) ReaderViewController *readerViewController;
 @property (nonatomic, strong) NotificationsViewController *notificationsViewController;
 @property (nonatomic, strong) MeViewController *meViewController;
 @property (nonatomic, strong) UIViewController *newPostViewController;
@@ -77,13 +78,22 @@ NSString * const kWPNewPostURLParamImageKey = @"image";
 
         [self setSelectedViewController:self.blogListNavigationController];
 
-        // since this is a singleton, it's ok to add the notification observer in the init
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(helpshiftUnreadCountUpdated:)
                                                      name:HelpshiftUnreadCountUpdatedNotification
                                                    object:nil];
+
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(defaultAccountDidChange:)
+                                                     name:WPAccountDefaultWordPressComAccountChangedNotification
+                                                   object:nil];
     }
     return self;
+}
+
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 #pragma mark - Tab Bar Items
@@ -123,15 +133,15 @@ NSString * const kWPNewPostURLParamImageKey = @"image";
         return _readerNavigationController;
     }
 
-    self.readerPostsViewController = [[ReaderPostsViewController alloc] init];
-    _readerNavigationController = [[UINavigationController alloc] initWithRootViewController:self.readerPostsViewController];
+    self.readerViewController = [[ReaderViewController alloc] init];
+    _readerNavigationController = [[UINavigationController alloc] initWithRootViewController:self.readerViewController];
     _readerNavigationController.navigationBar.translucent = NO;
     UIImage *readerTabBarImage = [UIImage imageNamed:@"icon-tab-reader"];
     _readerNavigationController.tabBarItem.image = [readerTabBarImage imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     _readerNavigationController.tabBarItem.selectedImage = readerTabBarImage;
     _readerNavigationController.restorationIdentifier = WPReaderNavigationRestorationID;
-    self.readerPostsViewController.title = NSLocalizedString(@"Reader", nil);
     [_readerNavigationController.tabBarItem setTitlePositionAdjustment:self.tabBarTitleOffset];
+    _readerNavigationController.tabBarItem.title = NSLocalizedString(@"Reader", @"Description of the Reader tab");
 
     return _readerNavigationController;
 }
@@ -202,7 +212,7 @@ NSString * const kWPNewPostURLParamImageKey = @"image";
 
 - (void)showTabForIndex:(NSInteger)tabIndex
 {
-    [self.tabBarController setSelectedIndex:tabIndex];
+    [self setSelectedIndex:tabIndex];
 }
 
 - (void)showMySitesTab
@@ -313,7 +323,7 @@ NSString * const kWPNewPostURLParamImageKey = @"image";
 {
     // Check which tab is currently selected
     NSString *currentlySelectedScreen = @"";
-    switch (self.tabBarController.selectedIndex) {
+    switch (self.selectedIndex) {
         case WPTabMySites:
             currentlySelectedScreen = @"Blog List";
             break;
@@ -368,12 +378,15 @@ NSString * const kWPNewPostURLParamImageKey = @"image";
     if (tabBarController.selectedViewController == viewController) {
         if ([viewController isKindOfClass:[UINavigationController class]]) {
             UINavigationController *navController = (UINavigationController *)viewController;
-            if (navController.topViewController == navController.viewControllers.firstObject &&
-                [navController.topViewController.view isKindOfClass:[UITableView class]]) {
-
-                UITableView *tableView = (UITableView *)[[navController topViewController] view];
-                CGPoint topOffset = CGPointMake(0.0f, -tableView.contentInset.top);
-                [tableView setContentOffset:topOffset animated:YES];
+            if (navController.topViewController == navController.viewControllers.firstObject) {
+                UIViewController *topViewController = navController.topViewController;
+                if ([topViewController.view isKindOfClass:[UITableView class]]) {
+                    UITableView *tableView = (UITableView *)topViewController.view;
+                    CGPoint topOffset = CGPointMake(0.0f, -tableView.contentInset.top);
+                    [tableView setContentOffset:topOffset animated:YES];
+                } else if ([[topViewController class] conformsToProtocol:@protocol(WPScrollableViewController)]) {
+                    [((id<WPScrollableViewController>)topViewController) scrollViewToTop];
+                }
             }
         }
     }
@@ -389,7 +402,7 @@ NSString * const kWPNewPostURLParamImageKey = @"image";
 
 - (BOOL)isNavigatingMySitesTab
 {
-    return (self.tabBarController.selectedIndex == WPTabMySites && [self.blogListViewController.navigationController.viewControllers count] > 1);
+    return (self.selectedIndex == WPTabMySites && [self.blogListViewController.navigationController.viewControllers count] > 1);
 }
 
 #pragma mark - Helpers
@@ -410,6 +423,16 @@ NSString * const kWPNewPostURLParamImageKey = @"image";
     else {
         [meTabBarItem setBadgeValue:[NSString stringWithFormat:@"%ld", unreadCount]];
     }
+}
+
+#pragma mark - Default Account Notifications
+
+- (void)defaultAccountDidChange:(NSNotification *)notification
+{
+    [self.blogListNavigationController popToRootViewControllerAnimated:NO];
+    [self.readerNavigationController popToRootViewControllerAnimated:NO];
+    [self.meNavigationController popToRootViewControllerAnimated:NO];
+    [self.notificationsNavigationController popToRootViewControllerAnimated:NO];
 }
 
 @end

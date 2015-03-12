@@ -2,9 +2,11 @@
 
 #import "ContextManager.h"
 #import "CustomHighlightButton.h"
+#import "ReaderBrowseSiteViewController.h"
 #import "ReaderCommentsViewController.h"
 #import "ReaderPost.h"
 #import "ReaderPostRichContentView.h"
+#import "ReaderPostRichUnattributedContentView.h"
 #import "ReaderPostService.h"
 #import "RebloggingViewController.h"
 #import "WPActivityDefaults.h"
@@ -13,6 +15,7 @@
 #import "WPTableImageSource.h"
 #import "WPWebViewController.h"
 #import "WordPress-Swift.h"
+#import "BlogService.h"
 
 static CGFloat const VerticalMargin = 40;
 static NSInteger const ReaderPostDetailImageQuality = 65;
@@ -100,6 +103,14 @@ static NSInteger const ReaderPostDetailImageQuality = 65;
 
 #pragma mark - Configuration
 
+- (Class)classForPostView
+{
+    if (self.readerViewStyle == ReaderViewStyleSitePreview) {
+        return [ReaderPostRichUnattributedContentView class];
+    }
+    return [ReaderPostRichContentView class];
+}
+
 - (void)configureNavbar
 {
     // Don't show 'Reader' in the next-view back button
@@ -119,7 +130,7 @@ static NSInteger const ReaderPostDetailImageQuality = 65;
 - (void)configurePostView
 {
     CGFloat width = IS_IPAD ? WPTableViewFixedWidth : CGRectGetWidth(self.view.bounds);
-    self.postView = [[ReaderPostRichContentView alloc] initWithFrame:CGRectMake(0.0, 0.0, width, 1.0)]; // minimal frame so rich text will have initial layout.
+    self.postView = [[[self classForPostView] alloc] initWithFrame:CGRectMake(0.0, 0.0, width, 1.0)]; // minimal frame so rich text will have initial layout.
     self.postView.translatesAutoresizingMaskIntoConstraints = NO;
     self.postView.delegate = self;
     self.postView.backgroundColor = [UIColor whiteColor];
@@ -129,6 +140,8 @@ static NSInteger const ReaderPostDetailImageQuality = 65;
     BOOL isLoggedIn = [[[AccountService alloc] initWithManagedObjectContext:context] defaultWordPressComAccount] != nil;
     self.postView.canShowActionButtons = isLoggedIn;
     self.postView.shouldShowAttributionButton = isLoggedIn;
+    
+    [self setReblogButtonVisibilityOfPostView:self.postView];
     
     [self.scrollView addSubview:self.postView];
 }
@@ -175,6 +188,12 @@ static NSInteger const ReaderPostDetailImageQuality = 65;
                                                                             options:0
                                                                             metrics:metrics
                                                                               views:views]];
+}
+
+- (void)setReblogButtonVisibilityOfPostView:(ReaderPostRichContentView *)postView
+{
+    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
+    postView.shouldHideReblogButton = ![blogService hasVisibleWPComAccounts];
 }
 
 - (UIActivityViewController *)activityViewControllerForSharing
@@ -284,7 +303,7 @@ static NSInteger const ReaderPostDetailImageQuality = 65;
 
 - (void)refresh
 {
-    self.title = self.post.postTitle ?: NSLocalizedString(@"Reader", @"Placeholder title for ReaderPostDetails.");
+    self.title = self.post.postTitle ?: NSLocalizedString(@"Post", @"Placeholder title for ReaderPostDetails.");
 
     [self refreshPostView];
 
@@ -404,6 +423,12 @@ static NSInteger const ReaderPostDetailImageQuality = 65;
         DDLogError(@"Error Following Blog : %@", [error localizedDescription]);
         [followButton setSelected:post.isFollowing];
     }];
+}
+
+- (void)contentViewDidReceiveAvatarAction:(UIView *)contentView
+{
+    ReaderBrowseSiteViewController *controller = [[ReaderBrowseSiteViewController alloc] initWithPost:self.post];
+    [self.navigationController pushViewController:controller animated:YES];
 }
 
 - (void)postView:(ReaderPostContentView *)postView didReceiveReblogAction:(id)sender
