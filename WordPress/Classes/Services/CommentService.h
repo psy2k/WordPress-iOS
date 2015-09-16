@@ -8,7 +8,9 @@ extern NSUInteger const WPTopLevelHierarchicalCommentsPerPage;
 @class ReaderPost;
 @class BasePost;
 
-@interface CommentService : NSObject <LocalCoreDataService>
+@interface CommentService : LocalCoreDataService
+
++ (BOOL)isSyncingCommentsForBlog:(Blog *)blog;
 
 // Create comment
 - (Comment *)createCommentForBlog:(Blog *)blog;
@@ -25,6 +27,11 @@ extern NSUInteger const WPTopLevelHierarchicalCommentsPerPage;
 - (void)syncCommentsForBlog:(Blog *)blog
                     success:(void (^)())success
                     failure:(void (^)(NSError *error))failure;
+
+// Load extra comments
+- (void)loadMoreCommentsForBlog:(Blog *)blog
+                        success:(void (^)(BOOL hasMore))success
+                        failure:(void (^)(NSError *))failure;
 
 // Upload comment
 - (void)uploadComment:(Comment *)comment

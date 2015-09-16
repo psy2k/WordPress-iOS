@@ -15,9 +15,6 @@
     XCTAssertTrue([[sampleText stringByEllipsizingWithMaxLength:100 preserveWords:NO] isEqualToString:sampleText], @"Incorrect Result.");
     XCTAssertTrue([[sampleText stringByEllipsizingWithMaxLength:0 preserveWords:NO] isEqualToString:@""], @"Incorrect Result.");
     
-    NSString *foreignLanguage = @"わたしはいぬがすきです";
-    XCTAssertTrue([[foreignLanguage stringByEllipsizingWithMaxLength:4 preserveWords:YES] isEqualToString:@"わたし…"], @"Incorrect Result.");
-    
     NSString *url = @"http://www.wordpress.com";
     XCTAssertTrue([[url stringByEllipsizingWithMaxLength:8 preserveWords:YES] isEqualToString:@"http://…"], @"Incorrect Result.");
     
@@ -117,6 +114,25 @@
     for (NSString *invalidDotcomPath in invalidDotcomUrls) {
         XCTAssertFalse(invalidDotcomPath.isWordPressComPath, @"Something went wrong. Better call Saul");
     }
+}
+
+- (void)testWordCount
+{
+    NSString *testEmptyPhrase = @"";
+    XCTAssert([testEmptyPhrase wordCount] == 0, @"Word count should be zero on a empty string");
+    
+    NSString *testPhraseEnglish = @"The lazy fox jumped over the fence.";
+    XCTAssert([testPhraseEnglish wordCount] == 7, @"Word count should be seven");
+
+    NSString *testPhraseSpanish = @"El zorro perezoso saltó por encima de la valla.";
+    XCTAssert([testPhraseSpanish wordCount] == 9, @"Word count should be nine");
+
+    NSString *testPhraseFrench = @"Le renard paresseux sauté par-dessus la clôture.";
+    XCTAssert([testPhraseFrench wordCount] == 8, @"Word count should be eight");
+
+    NSString *testPhrasePortuguese = @"A raposa preguiçosa saltou a cerca.";
+    XCTAssert([testPhrasePortuguese wordCount] == 6, @"Word count should be six");
+
 }
 
 @end

@@ -66,6 +66,22 @@ extension NotificationBlock
     }
 
     /**
+    *	@brief      Formats a NotificationBlock for usage in NoteBlockFooterTableViewCell
+    *
+    *	@returns	A Header Attributed String
+    */
+    public func attributedFooterText() -> NSAttributedString {
+        let attributedText = memoize { () -> NSAttributedString in
+            return self.textWithStyles(Styles.footerRegularStyle,
+                quoteStyles:    nil,
+                rangeStylesMap: Constants.footerStylesMap,
+                linksColor:     nil)
+        }
+        
+        return attributedText(Constants.richHeaderTitleCacheKey)
+    }
+    
+    /**
     *	@brief      Formats a NotificationBlock for usage into both, NoteBlockTextTableViewCell 
     *               and NoteBlockCommentTableViewCell.
     *
@@ -75,12 +91,12 @@ extension NotificationBlock
         //  Operations such as editing a comment cause a lag between the REST and Simperium update.
         //  TextOverride is a transient property meant to store, temporarily, the edited text
         if textOverride != nil {
-            return NSAttributedString(string: textOverride, attributes: Styles.blockRegularStyle)
+            return NSAttributedString(string: textOverride, attributes: Styles.contentBlockRegularStyle)
         }
         
         let attributedText = memoize { () -> NSAttributedString in
-            return self.textWithStyles(Styles.blockRegularStyle,
-                quoteStyles:    Styles.blockBoldStyle,
+            return self.textWithStyles(Styles.contentBlockRegularStyle,
+                quoteStyles:    Styles.contentBlockBoldStyle,
                 rangeStylesMap: Constants.richRangeStylesMap,
                 linksColor:     Styles.blockLinkColor)
         }
@@ -123,7 +139,12 @@ extension NotificationBlock
         
         var ranges = [NSValue: UIImage]()
         
-        for theMedia in media as [NotificationMedia] {
+        for theMedia in media as! [NotificationMedia] {
+            // Failsafe: if the mediaURL couldn't be parsed, don't proceed
+            if theMedia.mediaURL == nil {
+                continue
+            }
+            
             if let image = mediaMap![theMedia.mediaURL] {
                 let rangeValue      = NSValue(range: theMedia.range)
                 ranges[rangeValue]  = image
@@ -171,9 +192,9 @@ extension NotificationBlock
     *   @param      linksColor      The color that should be used on any links contained.
     *	@returns	A NSAttributedString instance, formatted with all of the specified parameters
     */
-    private func textWithStyles(attributes  : [NSString: AnyObject],
-                                quoteStyles : [NSString: AnyObject]?,
-                             rangeStylesMap : [NSString: AnyObject]?,
+    private func textWithStyles(attributes  : [String: AnyObject],
+                                quoteStyles : [String: AnyObject]?,
+                             rangeStylesMap : [String: AnyObject]?,
                                  linksColor : UIColor?) -> NSAttributedString
     {
         // Is it empty?
@@ -192,18 +213,19 @@ extension NotificationBlock
         // Apply the Ranges
         var lengthShift = 0
         
-        for range in ranges as [NotificationRange] {
+        for range in ranges as! [NotificationRange] {
             var shiftedRange        = range.range
             shiftedRange.location   += lengthShift
 
-            if let unwrappedRangeStyle = rangeStylesMap?[range.type] as? [NSString: AnyObject] {
-                theString.addAttributes(unwrappedRangeStyle, range: shiftedRange)
+            if range.isNoticon {
+                let noticon         = "\(range.value) "
+                theString.replaceCharactersInRange(shiftedRange, withString: noticon)
+                lengthShift         += noticon.characters.count
+                shiftedRange.length += noticon.characters.count
             }
             
-            if range.isNoticon {
-                let noticon = NSAttributedString(string: "\(range.value) ", attributes: Styles.subjectNoticonStyle)
-                theString.replaceCharactersInRange(shiftedRange, withAttributedString: noticon)
-                lengthShift += noticon.length
+            if let unwrappedRangeStyle = rangeStylesMap?[range.type] as? [String: AnyObject] {
+                theString.addAttributes(unwrappedRangeStyle, range: shiftedRange)
             }
             
             if range.url != nil && linksColor != nil {
@@ -223,7 +245,8 @@ extension NotificationBlock
             NoteRangeTypeUser               : Styles.subjectBoldStyle,
             NoteRangeTypePost               : Styles.subjectItalicsStyle,
             NoteRangeTypeComment            : Styles.subjectItalicsStyle,
-            NoteRangeTypeBlockquote         : Styles.subjectQuotedStyle
+            NoteRangeTypeBlockquote         : Styles.subjectQuotedStyle,
+            NoteRangeTypeNoticon            : Styles.subjectNoticonStyle
         ]
 
         static let headerTitleRangeStylesMap = [
@@ -231,12 +254,15 @@ extension NotificationBlock
             NoteRangeTypePost               : Styles.headerTitleContextStyle,
             NoteRangeTypeComment            : Styles.headerTitleContextStyle
         ]
+
+        static let footerStylesMap = [
+            NoteRangeTypeNoticon            : Styles.blockNoticonStyle
+        ]
         
         static let richRangeStylesMap = [
-            NoteRangeTypeUser               : Styles.blockBoldStyle,
-            NoteRangeTypePost               : Styles.blockItalicsStyle,
-            NoteRangeTypeComment            : Styles.blockItalicsStyle,
-            NoteRangeTypeBlockquote         : Styles.blockQuotedStyle
+            NoteRangeTypeBlockquote         : Styles.contentBlockQuotedStyle,
+            NoteRangeTypeNoticon            : Styles.blockNoticonStyle,
+            NoteRangeTypeMatch              : Styles.contentBlockMatchStyle
         ]
         
         static let badgeRangeStylesMap = [

@@ -13,22 +13,16 @@
 /// @name Properties
 ///-----------------
 
-@property (nonatomic, copy)     NSString    *xmlrpc;
+@property (nonatomic, strong)   NSNumber    *userID;
+@property (nonatomic, strong)   NSString    *avatarURL;
 @property (nonatomic, copy)     NSString    *username;
-@property (nonatomic, assign)   BOOL        isWpcom;
 @property (nonatomic, copy)     NSString    *uuid;
 @property (nonatomic, strong)   NSString    *email;
+@property (nonatomic, strong)   NSString    *displayName;
 @property (nonatomic, strong)   NSSet       *blogs;
 @property (nonatomic, strong)   NSSet       *jetpackBlogs;
 @property (nonatomic, readonly) NSArray     *visibleBlogs;
 @property (nonatomic, strong)   Blog        *defaultBlog;
-
-/**
- The self hosted account's password
- 
- Note that the password is stored using the keychain, not core data
- */
-@property (nonatomic, copy) NSString *password;
 
 /**
  The OAuth2 auth token for WordPress.com accounts
@@ -45,11 +39,6 @@
  */
 @property (nonatomic, readonly) WordPressComApi *restApi;
 
-/**
- A WordPressXMLRPCApi object configured for the XML-RPC endpoint
- */
-@property (nonatomic, readonly) WordPressXMLRPCApi *xmlrpcApi;
-
 @end
 
 @interface WPAccount (CoreDataGeneratedAccessors)
@@ -63,5 +52,16 @@
 - (void)removeJetpackBlogsObject:(Blog *)value;
 - (void)addJetpackBlogs:(NSSet *)values;
 - (void)removeJetpackBlogs:(NSSet *)values;
+
+#pragma mark - WordPress.com support methods
+
+/**
+ *  @brief      Call this method to know if the account is a WordPress.com account.
+ *  @details    This is the same as checking if restApi != nil, but it conveys its own meaning
+ *              in a cleaner way to the reader.
+ *
+ *  @returns    YES if this account is a WordPress.com account, NO otherwise.
+ */
+- (BOOL)isWPComAccount;
 
 @end

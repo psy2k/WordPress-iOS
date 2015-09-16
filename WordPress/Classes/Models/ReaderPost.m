@@ -1,14 +1,14 @@
 #import "ReaderPost.h"
-#import "WordPressComApi.h"
-#import "NSString+Helpers.h"
-#import "NSString+Util.h"
-#import "NSString+XMLExtensions.h"
-#import "WPAvatarSource.h"
-#import "NSString+Helpers.h"
-#import "WordPressAppDelegate.h"
-#import "ContextManager.h"
-#import "WPAccount.h"
 #import "AccountService.h"
+#import "ContextManager.h"
+#import "SourcePostAttribution.h"
+#import "NSString+Util.h"
+#import "NSString+Helpers.h"
+#import "NSString+XMLExtensions.h"
+#import "WordPressAppDelegate.h"
+#import "WordPressComApi.h"
+#import "WPAccount.h"
+#import "WPAvatarSource.h"
 
 // These keys are used in the getStoredComment method
 NSString * const ReaderPostStoredCommentIDKey = @"commentID";
@@ -24,7 +24,6 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 @dynamic blogURL;
 @dynamic commentCount;
 @dynamic commentsOpen;
-@dynamic dateCommentsSynced;
 @dynamic featuredImage;
 @dynamic isBlogPrivate;
 @dynamic isFollowing;
@@ -34,7 +33,6 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 @dynamic likeCount;
 @dynamic siteID;
 @dynamic sortDate;
-@dynamic storedComment;
 @dynamic summary;
 @dynamic comments;
 @dynamic tags;
@@ -43,6 +41,16 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 @dynamic isLikesEnabled;
 @dynamic isSharingEnabled;
 @dynamic isSiteBlocked;
+@dynamic sourceAttribution;
+
+@dynamic primaryTag;
+@dynamic primaryTagSlug;
+@dynamic secondaryTag;
+@dynamic secondaryTagSlug;
+@dynamic isExternal;
+@dynamic isJetpack;
+@dynamic wordCount;
+@dynamic readingTime;
 
 
 - (BOOL)isPrivate
@@ -50,28 +58,9 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
     return self.isBlogPrivate;
 }
 
-- (void)storeComment:(NSNumber *)commentID comment:(NSString *)comment
-{
-    self.storedComment = [NSString stringWithFormat:@"%i|storedcomment|%@", [commentID integerValue], comment];
-}
-
-- (NSDictionary *)getStoredComment
-{
-    if (!self.storedComment) {
-        return nil;
-    }
-
-    NSArray *arr = [self.storedComment componentsSeparatedByString:@"|storedcomment|"];
-    NSNumber *commentID = [[arr objectAtIndex:0] numericValue];
-    NSString *commentText = [arr objectAtIndex:1];
-    return @{ReaderPostStoredCommentIDKey:commentID, ReaderPostStoredCommentTextKey:commentText};
-}
-
 - (NSString *)authorString
 {
-    if ([self.blogName length] > 0) {
-        return self.blogName;
-    } else if ([self.authorDisplayName length] > 0) {
+    if ([self.authorDisplayName length] > 0) {
         return self.authorDisplayName;
     }
 
@@ -149,6 +138,18 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 
 #pragma mark - WPContentViewProvider protocol
 
+- (NSString *)blogNameForDisplay
+{
+    return self.blogName;
+}
+
+- (NSURL *)blavatarForDisplayOfSize:(NSInteger)size
+{
+    NSString *hash = [[[NSURL URLWithString:self.blogURL] host] md5];
+    NSString *str = [NSString stringWithFormat:@"http://gravatar.com/blavatar/%@/?s=%d&d=404", hash, size];
+    return [NSURL URLWithString:str];
+}
+
 - (NSString *)titleForDisplay
 {
     NSString *title = [[self.postTitle trim] stringByDecodingXMLCharacters];
@@ -178,5 +179,72 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
     return [self featuredImageURL];
 }
 
+- (NSString *)likeCountForDisplay
+{
+    NSString *likeStr = NSLocalizedString(@"Like", @"Text for the 'like' button. Tapping marks a post in the reader as 'liked'.");
+    NSString *likesStr = NSLocalizedString(@"Likes", @"Text for the 'like' button. Tapping removes the 'liked' status from a post.");
+
+    NSInteger count = [self.likeCount integerValue];
+    NSString *title;
+    if (count == 0) {
+        title = likesStr;
+    } else if (count == 1) {
+        title = [NSString stringWithFormat:@"%d %@", count, likeStr];
+    } else {
+        title = [NSString stringWithFormat:@"%d %@", count, likesStr];
+    }
+
+    return title;
+}
+
+- (SourceAttributionStyle)sourceAttributionStyle
+{
+    if ([self.sourceAttribution.attributionType isEqualToString:SourcePostAttributionTypePost]) {
+        return SourceAttributionStylePost;
+    } else if ([self.sourceAttribution.attributionType isEqualToString:SourcePostAttributionTypeSite]) {
+        return SourceAttributionStyleSite;
+    } else {
+        return SourceAttributionStyleNone;
+    }
+}
+
+- (NSString *)sourceAuthorNameForDisplay
+{
+    return self.sourceAttribution.authorName;
+}
+
+- (NSURL *)sourceAuthorURLForDisplay
+{
+    if (!self.sourceAttribution) {
+        return nil;
+    }
+    return [NSURL URLWithString:self.sourceAttribution.authorURL];
+}
+
+- (NSURL *)sourceAvatarURLForDisplay
+{
+    if (!self.sourceAttribution) {
+        return nil;
+    }
+    return [NSURL URLWithString:self.sourceAttribution.avatarURL];
+}
+
+- (NSString *)sourceBlogNameForDisplay
+{
+    return self.sourceAttribution.blogName;
+}
+
+- (NSURL *)sourceBlogURLForDisplay
+{
+    if (!self.sourceAttribution) {
+        return nil;
+    }
+    return [NSURL URLWithString:self.sourceAttribution.blogURL];
+}
+
+- (BOOL)isSourceAttributionWPCom
+{
+    return (self.sourceAttribution.blogID) ? YES : NO;
+}
 
 @end

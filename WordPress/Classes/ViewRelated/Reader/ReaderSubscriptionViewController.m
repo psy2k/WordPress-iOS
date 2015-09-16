@@ -1,23 +1,21 @@
+#import "ReaderSubscriptionViewController.h"
+
+#import <SVProgressHUD/SVProgressHUD.h>
 #import <WordPress-iOS-Shared/WPFontManager.h>
 #import <WordPress-iOS-Shared/UIImage+Util.h>
 
-#import "ReaderSubscriptionViewController.h"
-#import "ReaderEditableSubscriptionPage.h"
-#import "WPFriendFinderViewController.h"
-#import "SubscribedTopicsViewController.h"
-#import "RecommendedTopicsViewController.h"
-#import "FollowedSitesViewController.h"
-#import "ContextManager.h"
-#import "WPAccount.h"
 #import "AccountService.h"
-#import "ReaderTopicService.h"
+#import "ContextManager.h"
+#import "FollowedSitesViewController.h"
+#import "ReaderEditableSubscriptionPage.h"
 #import "ReaderSiteService.h"
+#import "ReaderTopicService.h"
+#import "RecommendedTopicsViewController.h"
+#import "SubscribedTopicsViewController.h"
+#import "WPAccount.h"
 #import "WPTableViewCell.h"
-#import "WPAlertView.h"
-#import "WPToast.h"
 #import "WordPress-Swift.h"
 
-static NSString *const FriendFinderURL = @"https://en.wordpress.com/reader/mobile/v2/?template=friendfinder";
 static NSString *const SubscribedTopicsPageIdentifier = @"SubscribedTopicsPageIdentifier";
 static NSString *const RecommendedTopicsPageIdentifier = @"RecommendedTopicsPageIdentifier";
 static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifier";
@@ -32,14 +30,12 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
 @interface ReaderSubscriptionViewController ()<UISearchBarDelegate, UIPageViewControllerDataSource, UIPageViewControllerDelegate>
 
 @property (nonatomic, strong) UISearchBar *searchBar;
-@property (nonatomic, strong) UIToolbar *toolBar;
 @property (nonatomic, strong) UIView *contentView;
 @property (nonatomic, strong) UIView *titleView;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UIPageControl *pageControl;
 @property (nonatomic, weak) UIPageViewController *pageViewController;
 @property (nonatomic, strong) UIBarButtonItem *cancelButton;
-@property (nonatomic, strong) UIBarButtonItem *friendButton;
 @property (nonatomic, assign) NSUInteger currentIndex;
 @property (nonatomic, strong) NSMutableArray *controllers;
 @property (nonatomic, strong) UIGestureRecognizer *tapOffKeyboardGesture;
@@ -75,7 +71,6 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
 
     [self configureControllers];
     [self configureSearchBar];
-    [self configureToolBar];
     [self.view addSubview:self.contentView];
     [self configurePageViewController];
     [self configureTitleView];
@@ -143,7 +138,7 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
 {
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
     WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-    return [defaultAccount isWpcom];
+    return defaultAccount != nil;
 }
 
 - (UIViewController *)viewControllerAtIndex:(NSInteger)index
@@ -244,9 +239,10 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
     __weak __typeof(self) weakSelf  = self;
     ReaderSiteService *service = [[ReaderSiteService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
     [service followSiteByURL:site success:^{
+        NSString *successMessage = NSLocalizedString(@"Followed", @"User followed a site.");
+        [SVProgressHUD showSuccessWithStatus:successMessage];
+        
         [weakSelf syncSites];
-        [WPToast showToastWithMessage:NSLocalizedString(@"Followed", @"User followed a site.")
-                             andImage:[UIImage imageNamed:@"action-icon-followed"]];
         [service syncPostsForFollowedSites];
     } failure:^(NSError *error) {
         DDLogError(@"Could not follow site: %@", error);
@@ -318,16 +314,6 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
     [self.view addSubview:self.searchBar];
 }
 
-- (void)configureToolBar
-{
-    if (![self isWPComUser]) {
-        [self.toolBar removeFromSuperview];
-        return;
-    }
-
-    [self.view addSubview:self.toolBar];
-}
-
 - (void)configurePageViewController
 {
     [self addChildViewController:self.pageViewController];
@@ -386,9 +372,9 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
 - (void)configureConstraints
 {
     [self.view removeConstraints:self.view.constraints];
-    NSDictionary *views = NSDictionaryOfVariableBindings(_searchBar, _toolBar, _contentView);
+    NSDictionary *views = NSDictionaryOfVariableBindings(_searchBar, _contentView);
     if ([self isWPComUser]) {
-        // Layout the search and tool bars.
+        // Layout the search and content.
         [self.view addConstraints:[NSLayoutConstraint
                                    constraintsWithVisualFormat:[self horizontalVisualFormatForViewNamed:@"_searchBar"]
                                    options:0
@@ -399,14 +385,9 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
                                    options:0
                                    metrics:nil
                                    views:views]];
-        [self.view addConstraints:[NSLayoutConstraint
-                                   constraintsWithVisualFormat:@"|[_toolBar]|"
-                                   options:0
-                                   metrics:nil
-                                   views:views]];
 
         [self.view addConstraints:[NSLayoutConstraint
-                                   constraintsWithVisualFormat:@"V:|[_searchBar][_contentView][_toolBar]|"
+                                   constraintsWithVisualFormat:@"V:|[_searchBar][_contentView]|"
                                    options:NSLayoutFormatAlignAllCenterX
                                    metrics:nil
                                    views:views]];
@@ -487,35 +468,6 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
     _searchBar = searchBar;
 
     return _searchBar;
-}
-
-- (UIToolbar *)toolBar
-{
-    if (_toolBar) {
-        return _toolBar;
-    }
-
-    UIToolbar *toolBar = [[UIToolbar alloc] init];
-    toolBar.translatesAutoresizingMaskIntoConstraints = NO;
-    [toolBar setItems:@[self.friendButton]];
-    _toolBar = toolBar;
-
-    return _toolBar;
-}
-
-- (UIBarButtonItem *)friendButton
-{
-    if (_friendButton) {
-        return _friendButton;
-    }
-    UIBarButtonItem *friendButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Friends", @"")
-                                                                     style:[WPStyleGuide barButtonStyleForBordered]
-                                                                    target:self
-                                                                    action:@selector(handleFriendFinderButtonTapped:)];
-
-    _friendButton = friendButton;
-
-    return _friendButton;
 }
 
 - (UIView *)contentView
@@ -630,13 +582,6 @@ static NSString *const FollowedSitesPageIdentifier = @"FollowedSitesPageIdentifi
 - (void)handleTopicChangedNotification:(NSNotification *)notification
 {
     [self dismissViewControllerAnimated:YES completion:nil];
-}
-
-- (void)handleFriendFinderButtonTapped:(id)sender
-{
-    WPFriendFinderViewController *controller = [[WPFriendFinderViewController alloc] init];
-    [self.navigationController pushViewController:controller animated:YES];
-    [controller loadURL:FriendFinderURL];
 }
 
 - (void)dismissKeyboard:(id)sender

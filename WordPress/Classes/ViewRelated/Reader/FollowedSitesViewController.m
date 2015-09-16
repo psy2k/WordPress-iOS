@@ -1,14 +1,12 @@
 #import "FollowedSitesViewController.h"
-#import "WPStyleGuide.h"
-#import "WPTableViewHandler.h"
 #import "ContextManager.h"
 #import "ReaderSite.h"
 #import "ReaderSiteService.h"
-#import "WPTableViewCell.h"
 #import "UIImageView+Gravatar.h"
+#import "WPStyleGuide.h"
+#import "WPTableViewCell.h"
+#import "WPTableViewHandler.h"
 #import "WPNoResultsView.h"
-#import "ReaderTopic.h"
-#import "ReaderTopicService.h"
 
 static NSString * const SiteCellIdentifier = @"SiteCellIdentifier";
 static CGFloat const FollowSitesRowHeight = 54.0;
@@ -151,10 +149,10 @@ static CGFloat const FollowSitesRowHeight = 54.0;
 
     ReaderSite *site = [self.tableViewHandler.resultsController objectAtIndexPath:indexPath];
     cell.textLabel.text = [site nameForDisplay];
-    cell.detailTextLabel.text = [site pathForDisplay];;
+    cell.detailTextLabel.text = [site pathForDisplay];
     if (site.icon) {
         cell.imageView.backgroundColor = nil;
-        [cell.imageView setImageWithBlavatarUrl:site.icon placeholderImage:defaultImage];
+        [cell.imageView setImageWithSiteIcon:site.icon placeholderImage:defaultImage];
     }
 
     [WPStyleGuide configureTableViewSmallSubtitleCell:cell];

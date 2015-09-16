@@ -9,24 +9,38 @@
 #import "ContextManager.h"
 #import "Blog.h"
 #import "WPAccount.h"
-#import "WPTableViewSectionHeaderView.h"
+#import "WPTableViewSectionHeaderFooterView.h"
 #import "AccountService.h"
 #import "BlogService.h"
 #import "TodayExtensionService.h"
 #import "WPTabBarController.h"
 #import "WPFontManager.h"
 #import "UILabel+SuggestSize.h"
+#import "WordPress-Swift.h"
+#import "WPSearchControllerConfigurator.h"
+#import "WPGUIConstants.h"
+
+typedef NS_ENUM(NSInteger, BlogListSections) {
+    BlogListSectionsAllSites = 0,
+    BlogListSectionsNewSite,
+    BlogListSectionsCount
+};
 
 static NSString *const AddSiteCellIdentifier = @"AddSiteCell";
 static NSString *const BlogCellIdentifier = @"BlogCell";
 static CGFloat const BLVCHeaderViewLabelPadding = 10.0;
-static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
+static CGFloat const BLVCSiteRowHeight = 54.0;
+
 
 @interface BlogListViewController () <UIViewControllerRestoration>
 
 @property (nonatomic, strong) NSFetchedResultsController *resultsController;
 @property (nonatomic, strong) UIView *headerView;
 @property (nonatomic, strong) UILabel *headerLabel;
+@property (nonatomic, strong) WPSearchController *searchController;
+@property (nonatomic, strong) IBOutlet UIView *searchWrapperView;
+@property (nonatomic, strong) IBOutlet UITableView *tableView;
+@property (nonatomic, strong) IBOutlet NSLayoutConstraint *searchWrapperViewHeightConstraint;
 
 @end
 
@@ -42,9 +56,9 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
-- (id)initWithStyle:(UITableViewStyle)style
+- (instancetype)init
 {
-    self = [super initWithStyle:UITableViewStyleGrouped];
+    self = [super init];
     if (self) {
         self.restorationIdentifier = NSStringFromClass([self class]);
         self.restorationClass = [self class];
@@ -55,6 +69,12 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
                                                                       target:nil
                                                                       action:nil];
         [self.navigationItem setBackBarButtonItem:backButton];
+        
+        UIBarButtonItem *searchButton = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"icon-post-search"]
+                                                                         style:UIBarButtonItemStylePlain
+                                                                        target:self
+                                                                        action:@selector(toggleSearch)];
+        [self.navigationItem setRightBarButtonItem:searchButton];
     }
     return self;
 }
@@ -106,41 +126,31 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
     }
 
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
-
-    [self.tableView registerClass:[WPTableViewCell class] forCellReuseIdentifier:AddSiteCellIdentifier];
-    [self.tableView registerClass:[WPBlogTableViewCell class] forCellReuseIdentifier:BlogCellIdentifier];
-    self.tableView.allowsSelectionDuringEditing = YES;
-    self.tableView.accessibilityIdentifier = NSLocalizedString(@"Blogs", @"");
-    self.navigationItem.leftBarButtonItem = self.editButtonItem;
-    self.navigationItem.leftBarButtonItem.accessibilityIdentifier = NSLocalizedString(@"Edit", @"");
-
-    [self setupHeaderView];
+    self.editButtonItem.accessibilityIdentifier = NSLocalizedString(@"Edit", @"");
     
-    // Trigger the blog sync when loading the view, which should more or less be once when the app launches
-    // We could do this on the app delegate, but the blogs list feels like a better place for it.
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
-    [context performBlock:^{
-        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-        BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-        WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-
-        [blogService syncBlogsForAccount:defaultAccount success:nil failure:nil];
-    }];
+    [self configureTableView];
+    [self configureHeaderView];
+    [self configureSearchController];
 }
 
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-
+    [self registerForKeyboardNotifications];
     [self.navigationController setNavigationBarHidden:NO animated:animated];
     self.resultsController.delegate = self;
     [self.resultsController performFetch:nil];
     [self.tableView reloadData];
+    [self updateEditButton];
+    [self maybeShowNUX];
+    [self syncBlogs];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
 {
+    [self.searchController setActive:NO];
     [super viewWillDisappear:animated];
+    [self unregisterForKeyboardNotifications];
     self.resultsController.delegate = nil;
 }
 
@@ -155,22 +165,89 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
     }
 }
 
+- (void)registerForKeyboardNotifications
+{
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardDidShow:) name:UIKeyboardDidShowNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
+}
+
+- (void)unregisterForKeyboardNotifications
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardDidShowNotification object:nil];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardWillHideNotification object:nil];
+}
+
+- (void)keyboardDidShow:(NSNotification *)notification
+{
+    NSDictionary *info = notification.userInfo;
+    CGFloat keyboardHeight = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue].size.height;
+    CGFloat tabBarHeight = self.tabBarController.tabBar.bounds.size.height;
+    
+    UIEdgeInsets newInsets = UIEdgeInsetsMake(0.0, 0.0, keyboardHeight - tabBarHeight, 0.0);
+    self.tableView.contentInset = newInsets;
+    self.tableView.scrollIndicatorInsets = newInsets;
+}
+
+- (void)keyboardWillHide:(NSNotification *)notification
+{
+    self.tableView.contentInset = UIEdgeInsetsZero;
+    self.tableView.scrollIndicatorInsets = UIEdgeInsetsZero;
+}
+
 - (NSUInteger)numSites
 {
     return [[self.resultsController fetchedObjects] count];
 }
 
-- (BOOL)hasDotComAndSelfHosted
+- (NSUInteger)numberOfHideableBlogs
 {
-    return ([[self.resultsController sections] count] > 1);
+    NSPredicate *predicate = [self fetchRequestPredicateForHideableBlogs];
+    NSArray *dotComSites = [[self.resultsController fetchedObjects] filteredArrayUsingPredicate:predicate];
+    return [dotComSites count];
+}
+
+- (void)updateEditButton
+{
+    if ([self numberOfHideableBlogs] > 0) {
+        self.navigationItem.leftBarButtonItem = self.editButtonItem;
+    } else {
+        self.navigationItem.leftBarButtonItem = nil;
+    }
+}
+
+- (void)maybeShowNUX
+{
+    if ([self numSites] > 0) {
+        return;
+    }
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+    if (!defaultAccount) {
+        [WPAnalytics track:WPAnalyticsStatLogout];
+        [[WordPressAppDelegate sharedInstance] showWelcomeScreenIfNeededAnimated:YES];
+    }
+}
+
+- (void)syncBlogs
+{
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
+    [context performBlock:^{
+        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+        BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+        WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+
+        if (defaultAccount) {
+            [blogService syncBlogsForAccount:defaultAccount success:nil failure:nil];
+        }
+    }];
 }
 
 #pragma mark - Header methods
 
-- (void)setupHeaderView
+- (void)configureHeaderView
 {
     self.headerView = [[UIView alloc] initWithFrame:CGRectZero];
-
     self.headerLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.headerLabel.numberOfLines = 0;
     self.headerLabel.textAlignment = NSTextAlignmentCenter;
@@ -209,6 +286,53 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
     [self tableView:self.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
 }
 
+#pragma mark - Configuration
+
+- (UIStatusBarStyle)preferredStatusBarStyle
+{
+    return UIStatusBarStyleLightContent;
+}
+
+- (void)configureTableView
+{
+    self.tableView.delegate = self;
+    self.tableView.dataSource = self;
+    [self.tableView registerClass:[WPTableViewCell class] forCellReuseIdentifier:AddSiteCellIdentifier];
+    [self.tableView registerClass:[WPBlogTableViewCell class] forCellReuseIdentifier:BlogCellIdentifier];
+    self.tableView.allowsSelectionDuringEditing = YES;
+    self.tableView.accessibilityIdentifier = NSLocalizedString(@"Blogs", @"");
+}
+
+- (void)configureSearchController
+{
+    self.searchController = [[WPSearchController alloc] initWithSearchResultsController:nil];
+    
+    WPSearchControllerConfigurator *searchControllerConfigurator = [[WPSearchControllerConfigurator alloc] initWithSearchController:self.searchController
+                                                                                                    withSearchWrapperView:self.searchWrapperView];
+    [searchControllerConfigurator configureSearchControllerAndWrapperView];
+    [self configureSearchBarPlaceholder];
+    self.searchController.delegate = self;
+    self.searchController.searchResultsUpdater = self;
+}
+
+- (void)configureSearchBarPlaceholder
+{
+    // Adjust color depending on where the search bar is being presented.
+    UIColor *placeholderColor = [WPStyleGuide wordPressBlue];
+    NSString *placeholderText = NSLocalizedString(@"Search", @"Placeholder text for the search bar on the post screen.");
+    NSAttributedString *attrPlacholderText = [[NSAttributedString alloc] initWithString:placeholderText attributes:[WPStyleGuide defaultSearchBarTextAttributes:placeholderColor]];
+    [[UITextField appearanceWhenContainedIn:[UISearchBar class], [self class], nil] setAttributedPlaceholder:attrPlacholderText];
+    [[UITextField appearanceWhenContainedIn:[UISearchBar class], [self class], nil] setDefaultTextAttributes:[WPStyleGuide defaultSearchBarTextAttributes:[UIColor whiteColor]]];
+}
+
+- (CGFloat)heightForSearchWrapperView
+{
+    if ([UIDevice isPad]) {
+        return SearchWrapperViewPortraitHeight;
+    }
+    return UIDeviceOrientationIsPortrait(self.interfaceOrientation) ? SearchWrapperViewPortraitHeight : SearchWrapperViewLandscapeHeight;
+}
+
 #pragma mark - Notifications
 
 - (void)wordPressComApiDidLogin:(NSNotification *)notification
@@ -225,7 +349,11 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
-    return [self sectionForDotCom] >= 0? 2 : 1;
+    if (self.tableView.isEditing || [self.searchController isActive]) { // Don't show "Add Site"
+        return BlogListSectionsCount - 1;
+    } else {
+        return BlogListSectionsCount;
+    }
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -235,11 +363,9 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
     if ([self.resultsController sections].count > section) {
         sectionInfo = [[self.resultsController sections] objectAtIndex:section];
         numberOfRows = sectionInfo.numberOfObjects;
-    }
-
-    if (section == [self sectionForSelfHosted]) {
+    } else {
         // This is for the "Add a Site" row
-        numberOfRows++;
+        numberOfRows = 1;
     }
 
     return numberOfRows;
@@ -265,14 +391,6 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
     return cell;
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
-{
-    if (![self hasDotComAndSelfHosted]) {
-        return nil;
-    }
-    return [[self.resultsController sectionIndexTitles] objectAtIndex:section];
-}
-
 - (NSString *)tableView:(UITableView *)tableView titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     return NSLocalizedString(@"Remove", @"Button label when removing a blog");
@@ -280,78 +398,12 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return indexPath.section == [self sectionForSelfHosted] && ![indexPath isEqual:[self indexPathForAddSite]];
-}
-
-- (UITableViewCellEditingStyle)tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    if (indexPath.section == [self sectionForSelfHosted] && tableView.editing) {
-        return UITableViewCellEditingStyleDelete;
-    }
-
-    return UITableViewCellEditingStyleNone;
-}
-
-- (void)tableView:(UITableView *)tableView
-    commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
-    forRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    if (editingStyle == UITableViewCellEditingStyleDelete) {
-        Blog *blog = [self.resultsController objectAtIndexPath:indexPath];
-        if (blog.isWPcom) {
-            DDLogWarn(@"Tried to remove a WordPress.com blog. This shouldn't happen but just in case, let's hide it");
-            blog.visible = NO;
-            [blog dataSave];
-        } else {
-            [blog remove];
-        }
-
-        // Count won't be updated yet; if this is the last site (count 1), exit editing mode
-        if ([self numSites] == 1) {
-            // Update the UI in the next run loop after the resultsController has updated
-            // (otherwise row insertion/deletion logic won't work)
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self setEditing:NO animated:NO];
-
-                // No blogs and  signed out, show NUX
-                NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-                AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-                WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-
-                if (!defaultAccount) {
-                    [WPAnalytics track:WPAnalyticsStatLogout];
-                    [[WordPressAppDelegate sharedWordPressApplicationDelegate] showWelcomeScreenIfNeededAnimated:YES];
-                }
-            });
-        }
-    }
-}
-
-- (NSInteger)sectionForDotCom
-{
-    if ([self.resultsController sections].count > 0) {
-        id<NSFetchedResultsSectionInfo> sectionInfo = [[self.resultsController sections] objectAtIndex:0];
-        if ([[sectionInfo name] isEqualToString:@"1"]) {
-            return 0;
-        }
-    }
-
-    return -1;
-}
-
-- (NSInteger)sectionForSelfHosted
-{
-    if ([self sectionForDotCom] >= 0) {
-        return 1;
-    }
-
-    return 0;
+    return NO;
 }
 
 - (NSIndexPath *)indexPathForAddSite
 {
-    NSInteger section = [self sectionForSelfHosted];
-    return [NSIndexPath indexPathForRow:([self.tableView numberOfRowsInSection:section] - 1) inSection:section];
+    return [NSIndexPath indexPathForRow:0 inSection:1];
 }
 
 - (void)configureCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
@@ -366,7 +418,6 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
         cell.selectionStyle = UITableViewCellSelectionStyleBlue;
         cell.textLabel.textAlignment = NSTextAlignmentCenter;
     } else {
-
         Blog *blog = [self.resultsController objectAtIndexPath:indexPath];
         if ([blog.blogName length] != 0) {
             cell.textLabel.text = blog.blogName;
@@ -376,8 +427,8 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
             cell.detailTextLabel.text = @"";
         }
 
-        [cell.imageView setImageWithBlavatarUrl:blog.blavatarUrl isWPcom:blog.isWPcom];
-        if ([self.tableView isEditing] && blog.isWPcom) {
+        [cell.imageView setImageWithSiteIcon:blog.icon];
+        if ([self.tableView isEditing] && [blog supports:BlogFeatureVisibility]) {
             UISwitch *visibilitySwitch = [UISwitch new];
             visibilitySwitch.on = blog.visible;
             visibilitySwitch.tag = indexPath.row;
@@ -397,25 +448,20 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
     }
 }
 
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
+{
+    return nil;
+}
+
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
-    NSString *title = [self tableView:self.tableView titleForHeaderInSection:section];
-    if (title.length > 0) {
-        WPTableViewSectionHeaderView *header = [[WPTableViewSectionHeaderView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.view.bounds), 0)];
-        header.title = title;
-        return header;
-    }
     return nil;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
-    NSString *title = [self tableView:self.tableView titleForHeaderInSection:section];
-    if (title.length > 0) {
-        return [WPTableViewSectionHeaderView heightForTitle:title andWidth:CGRectGetWidth(self.view.bounds)];
-    }
     // since we show a tableHeaderView while editing, we want to keep the section header short for iPad during edit
-    return (IS_IPHONE || self.tableView.isEditing) ? CGFLOAT_MIN : BLVCSectionHeaderHeightForIPad;
+    return (IS_IPHONE || self.tableView.isEditing) ? CGFLOAT_MIN : WPTableHeaderPadFrame.size.height;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
@@ -440,17 +486,24 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
         if (!defaultAccount) {
             loginViewController.prefersSelfHosted = YES;
         }
-        loginViewController.dismissBlock = ^{
+        loginViewController.dismissBlock = ^(BOOL cancelled){
             [self dismissViewControllerAnimated:YES completion:nil];
         };
         UINavigationController *loginNavigationController = [[UINavigationController alloc] initWithRootViewController:loginViewController];
         [self presentViewController:loginNavigationController animated:YES completion:nil];
     } else if (self.tableView.isEditing) {
+        UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+        UISwitch *visibleSwitch = (UISwitch *)cell.accessoryView;
+        if (visibleSwitch && [visibleSwitch isKindOfClass:[UISwitch class]]) {
+            visibleSwitch.on = !visibleSwitch.on;
+            [self visibilitySwitchAction:visibleSwitch];
+        }
         return;
     } else {
         NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
         BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
         Blog *blog = [self.resultsController objectAtIndexPath:indexPath];
+        blog.visible = YES;
         [blogService flagBlogAsLastUsed:blog];
 
         BlogDetailsViewController *blogDetailsViewController = [[BlogDetailsViewController alloc] init];
@@ -461,12 +514,49 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return 54;
+    return (indexPath.section == BlogListSectionsNewSite) ? WPTableViewDefaultRowHeight : BLVCSiteRowHeight;
 }
+
+# pragma mark - WPSeachController delegate methods
+
+- (void)presentSearchController:(WPSearchController *)searchController
+{
+    [self.navigationController setNavigationBarHidden:YES animated:YES]; // Remove this line when switching to UISearchController.
+    self.searchWrapperViewHeightConstraint.constant = [self heightForSearchWrapperView];
+    [UIView animateWithDuration:SearchBarAnimationDuration
+                          delay:0.0
+                        options:0
+                     animations:^{
+                         [self.view layoutIfNeeded];
+                     } completion:^(BOOL finished) {
+                         [self.searchController.searchBar becomeFirstResponder];
+                     }];
+}
+
+- (void)willDismissSearchController:(WPSearchController *)searchController
+{
+    [self.searchController.searchBar resignFirstResponder];
+    [self.navigationController setNavigationBarHidden:NO animated:YES]; // Remove this line when switching to UISearchController.
+    self.searchWrapperViewHeightConstraint.constant = 0;
+    [UIView animateWithDuration:SearchBarAnimationDuration animations:^{
+        [self.view layoutIfNeeded];
+    }];
+    
+    self.searchController.searchBar.text = nil;
+}
+
+- (void)updateSearchResultsForSearchController:(WPSearchController *)searchController
+{
+    [self updateFetchRequest];
+}
+
+# pragma mark - Navigation Bar
 
 - (void)setEditing:(BOOL)editing animated:(BOOL)animated
 {
     [super setEditing:editing animated:animated];
+    [self.tableView setEditing:editing animated:animated];
+    self.navigationItem.rightBarButtonItem.enabled = !editing;
 
     if (editing) {
         [self updateHeaderSize];
@@ -498,13 +588,18 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
     }
 }
 
+- (void)toggleSearch
+{
+    self.searchController.active = !self.searchController.active;
+}
+
 - (void)visibilitySwitchAction:(id)sender
 {
     UISwitch *switcher = (UISwitch *)sender;
     Blog *blog = [self.resultsController objectAtIndexPath:[NSIndexPath indexPathForRow:switcher.tag inSection:0]];
     if (switcher.on != blog.visible) {
         blog.visible = switcher.on;
-        [blog dataSave];
+        [[ContextManager sharedInstance] saveContext:blog.managedObjectContext];
     }
 }
 
@@ -518,13 +613,13 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
 
     NSManagedObjectContext *moc = [[ContextManager sharedInstance] mainContext];
     NSFetchRequest *fetchRequest = [NSFetchRequest fetchRequestWithEntityName:@"Blog"];
-    [fetchRequest setSortDescriptors:@[[NSSortDescriptor sortDescriptorWithKey:@"account.isWpcom" ascending:NO], [NSSortDescriptor sortDescriptorWithKey:@"blogName" ascending:YES selector:@selector(localizedCaseInsensitiveCompare:)]]];
+    [fetchRequest setSortDescriptors:@[[NSSortDescriptor sortDescriptorWithKey:@"blogName" ascending:YES selector:@selector(localizedCaseInsensitiveCompare:)]]];
     [fetchRequest setPredicate:[self fetchRequestPredicate]];
 
     _resultsController = [[NSFetchedResultsController alloc]
                           initWithFetchRequest:fetchRequest
                           managedObjectContext:moc
-                          sectionNameKeyPath:@"isWPcom"
+                          sectionNameKeyPath:nil
                           cacheName:nil];
     _resultsController.delegate = self;
 
@@ -539,10 +634,36 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
 - (NSPredicate *)fetchRequestPredicate
 {
     if ([self.tableView isEditing]) {
-        return nil;
+        return [self fetchRequestPredicateForHideableBlogs];
+    } else if ([self.searchController isActive]) {
+        return [self fetchRequestPredicateForSearch];
     }
 
     return [NSPredicate predicateWithFormat:@"visible = YES"];
+}
+
+- (NSPredicate *)fetchRequestPredicateForSearch
+{
+    NSString *searchText = self.searchController.searchBar.text;
+    
+    if ([searchText isEmpty]) {
+        return [self fetchRequestPredicateForHideableBlogs];
+    } else {
+        return [NSPredicate predicateWithFormat:@"( blogName contains[cd] %@ ) OR ( url contains[cd] %@)", searchText, searchText];
+    }
+}
+
+- (NSPredicate *)fetchRequestPredicateForHideableBlogs
+{
+    /*
+     -[Blog supports:BlogFeatureVisibility] should match this, but the logic needs
+     to be duplicated because core data can't take block predicates.
+     */
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+
+    return [NSPredicate predicateWithFormat:@"account != NULL AND account = %@", defaultAccount];
 }
 
 - (void)updateFetchRequest
@@ -560,19 +681,8 @@ static CGFloat const BLVCSectionHeaderHeightForIPad = 40.0;
 - (void)controllerDidChangeContent:(NSFetchedResultsController *)controller
 {
     [self.tableView reloadData];
-}
-
-- (NSString *)controller:(NSFetchedResultsController *)controller
-          sectionIndexTitleForSectionName:(NSString *)sectionName
-{
-    if ([sectionName isEqualToString:@"1"]) {
-        NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-        WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-
-        return [NSString stringWithFormat:NSLocalizedString(@"%@'s sites", @"Section header for WordPress.com blogs"), [defaultAccount username]];
-    }
-    return NSLocalizedString(@"Self Hosted", @"Section header for self hosted blogs");
+    [self updateEditButton];
+    [self maybeShowNUX];
 }
 
 @end

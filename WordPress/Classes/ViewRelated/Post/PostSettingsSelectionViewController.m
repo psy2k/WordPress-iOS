@@ -2,13 +2,23 @@
 #import "WPStyleGuide.h"
 #import "NSString+XMLExtensions.h"
 #import "WPTableViewCell.h"
+#import "WPTableViewSectionHeaderFooterView.h"
+
+NSString * const SettingsSelectionTitleKey = @"Title";
+NSString * const SettingsSelectionTitlesKey = @"Titles";
+NSString * const SettingsSelectionValuesKey = @"Values";
+NSString * const SettingsSelectionHintsKey = @"Hints";
+NSString * const SettingsSelectionDefaultValueKey = @"DefaultValue";
+NSString * const SettingsSelectionCurrentValueKey = @"CurrentValue";
 
 @interface PostSettingsSelectionViewController ()
 
 @property (nonatomic, strong) NSArray *titles;
 @property (nonatomic, strong) NSArray *values;
+@property (nonatomic, strong) NSArray *hints;
 @property (nonatomic, strong) NSString *defaultValue;
-@property (nonatomic, strong) NSString *currentValue;
+@property (nonatomic, strong) NSObject *currentValue;
+@property (nonatomic, strong) WPTableViewSectionHeaderFooterView *hintView;
 
 @end
 
@@ -37,19 +47,24 @@
 }
 */
 
-- (id)initWithDictionary:(NSDictionary *)dictionary
+- (instancetype)initWithDictionary:(NSDictionary *)dictionary
 {
-    self = [self initWithStyle:UITableViewStyleGrouped];
+    return [self initWithStyle:UITableViewStyleGrouped andDictionary:dictionary];
+}
 
+- (instancetype)initWithStyle:(UITableViewStyle)style andDictionary:(NSDictionary *)dictionary
+{
+    self = [self initWithStyle:style];
     if (self) {
-        self.title = [dictionary objectForKey:@"Title"];
-        self.titles = [dictionary objectForKey:@"Titles"];
-        self.values = [dictionary objectForKey:@"Values"];
-        self.defaultValue = [dictionary objectForKey:@"DefaultValue"];
-        self.currentValue = [dictionary objectForKey:@"CurrentValue"];
+        self.title = [dictionary objectForKey:SettingsSelectionTitleKey];
+        _titles = [dictionary objectForKey:SettingsSelectionTitlesKey];
+        _values = [dictionary objectForKey:SettingsSelectionValuesKey];
+        _hints = [dictionary objectForKey:SettingsSelectionHintsKey];
+        _defaultValue = [dictionary objectForKey:SettingsSelectionDefaultValueKey];
+        _currentValue = [dictionary objectForKey:SettingsSelectionCurrentValueKey];
 
-        if (self.currentValue == nil) {
-            self.currentValue = self.defaultValue;
+        if (_currentValue == nil) {
+            _currentValue = _defaultValue;
         }
     }
     return self;
@@ -58,11 +73,53 @@
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+    if (self.tableView.style == UITableViewStylePlain) {
+        // Hides cell dividers.
+        self.tableView.tableFooterView = [UIView new];
+    }
+
+    [self configureCancelButton];
+
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
 }
 
-#pragma mark -
-#pragma mark Table view data source
+- (void)configureCancelButton
+{
+    if ([self.navigationController.viewControllers count] > 1) {
+        // showing a back button instead
+        return;
+    }
+
+    UIBarButtonItem *cancelButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(didTapCancelButton:)];
+    self.navigationItem.rightBarButtonItem = cancelButton;
+}
+
+- (void)didTapCancelButton:(id)sender
+{
+    [self dismissViewControllerAnimated:YES completion:nil];
+    if (self.onCancel) {
+        self.onCancel();
+    }
+}
+
+- (UIView *)hintView
+{
+    if (!self.hints) {
+        return nil;
+    }
+    if (!_hintView) {
+        _hintView = [[WPTableViewSectionHeaderFooterView alloc] initWithReuseIdentifier:nil style:WPTableViewSectionStyleFooter];
+    }
+    NSUInteger position = [self.values indexOfObject:self.currentValue];
+    NSString * hint = @"";
+    if (position != NSNotFound) {
+        hint = self.hints[position];
+    }
+    [_hintView setTitle:hint];
+    return _hintView;
+}
+
+#pragma mark - Table view data source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
@@ -102,13 +159,18 @@
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    NSString *val = [self.values objectAtIndex:indexPath.row];
+    NSObject *val = [self.values objectAtIndex:indexPath.row];
     self.currentValue = val;
     [self.tableView reloadData];
 
     if (self.onItemSelected != nil) {
         self.onItemSelected(val);
     }
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
+{
+    return self.hintView;
 }
 
 - (void)dismiss

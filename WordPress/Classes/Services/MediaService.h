@@ -9,7 +9,7 @@ extern NSInteger const MediaMaxImageSizeDimension;
 @class Media;
 @class Blog;
 
-@interface MediaService : NSObject <LocalCoreDataService>
+@interface MediaService : LocalCoreDataService
 
 + (CGSize)maxImageSizeSetting;
 
@@ -62,5 +62,57 @@ extern NSInteger const MediaMaxImageSizeDimension;
  @return the Media object with the mediaID that belongs to the blog. Nil if not found.
  */
 - (Media *)findMediaWithID:(NSNumber *)mediaID inBlog:(Blog *)blog;
+
+/**
+ *  Obtains the  video url and poster image url for the video with the videoPressID
+ *
+ *  @param videoPressID ID of video in VideoPress
+ *  @param blog         blog to use to access video references
+ *  @param success      return block if videopress info is found
+ *  @param failure      return block if not information found.
+ */
+- (void)getMediaURLFromVideoPressID:(NSString *)videoPressID
+                             inBlog:(Blog *)blog
+                            success:(void (^)(NSString *videoURL, NSString *posterURL))success
+                            failure:(void (^)(NSError *error))failure;
+/**
+ * Sync all Media objects from the server to local database
+ 
+ * @param blog
+ * @param success a block that will be invoked when the sync succeeds
+ * @param failure a block that will be invoked when the sync fails
+ */
+- (void)syncMediaLibraryForBlog:(Blog *)blog
+                        success:(void (^)())success
+                        failure:(void (^)(NSError *error))failure;
+
+/**
+ + Get a thumbnail image for a Media by downloading its image or using the local cache
+ +
+ + @param media
+ + @success a block that will be invoked when the media is retrieved
+ + @failure a block that will be invoked if an error happens returnin the associated error object with the details.
+ + */
+- (void)thumbnailForMedia:(Media *)media
+                     size:(CGSize)size
+                  success:(void (^)(UIImage *image))success
+                  failure:(void (^)(NSError *error))failure;
+/**
+ *  Get number of items in media library
+ *
+ *  @param blog    from where to count the media items
+ *  @param success a block that will be invoked when the media is retrieved
+ *  @param failure a block that will be invoked if an error happens returnin the associated error object with the details.
+ */
+- (void)getMediaLibraryCountForBlog:(Blog *)blog
+                            success:(void (^)(NSInteger))success
+                            failure:(void (^)(NSError *error))failure;
+
+#pragma mark - Media cleanup
+
+/**
+ *  @brief      Removes all unused media files from the tmp directorys.
+ */
++ (void)cleanUnusedMediaFileFromTmpDir;
 
 @end

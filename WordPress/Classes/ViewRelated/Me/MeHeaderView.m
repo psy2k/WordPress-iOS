@@ -2,14 +2,16 @@
 #import "Blog.h"
 #import "UIImageView+Gravatar.h"
 
-const CGFloat MeHeaderViewHeight = 175;
+const CGFloat MeHeaderViewHeight = 210;
 const CGFloat MeHeaderViewGravatarSize = 120.0;
 const CGFloat MeHeaderViewLabelHeight = 20.0;
-const CGFloat MeHeaderViewVerticalMargin = 10.0;
+const CGFloat MeHeaderViewVerticalMargin = 20.0;
+const CGFloat MeHeaderViewVerticalSpacing = 10.0;
 
 @interface MeHeaderView ()
 
 @property (nonatomic, strong) UIImageView *gravatarImageView;
+@property (nonatomic, strong) UILabel *displayNameLabel;
 @property (nonatomic, strong) UILabel *usernameLabel;
 
 @end
@@ -22,6 +24,9 @@ const CGFloat MeHeaderViewVerticalMargin = 10.0;
     if (self) {
         _gravatarImageView = [self imageViewForGravatar];
         [self addSubview:_gravatarImageView];
+
+        _displayNameLabel = [self labelForDisplayName];
+        [self addSubview:_displayNameLabel];
 
         _usernameLabel = [self labelForUsername];
         [self addSubview:_usernameLabel];
@@ -38,27 +43,34 @@ const CGFloat MeHeaderViewVerticalMargin = 10.0;
     return CGSizeMake(UIViewNoIntrinsicMetric, MeHeaderViewHeight);
 }
 
+- (void)setDisplayName:(NSString *)displayName
+{
+    self.displayNameLabel.text = displayName;
+}
+
 - (void)setUsername:(NSString *)username
 {
     // If the username is an email, we don't want the preceding @ sign before it
     NSString *prefix = ([username rangeOfString:@"@"].location != NSNotFound) ? @"" : @"@";
-    self.usernameLabel.text = [NSString stringWithFormat:@"%@%@", prefix, username];;
+    self.usernameLabel.text = [NSString stringWithFormat:@"%@%@", prefix, username];
 }
 
 - (void)setGravatarEmail:(NSString *)gravatarEmail
 {
-    [self.gravatarImageView setImageWithGravatarEmail:gravatarEmail];
+    // Since this view is only visible to the current user, we should show all ratings
+    [self.gravatarImageView setImageWithGravatarEmail:gravatarEmail gravatarRating:GravatarRatingX];
 }
 
 #pragma mark - Private Methods
 
 - (void)configureConstraints
 {
-    NSDictionary *views = NSDictionaryOfVariableBindings(_gravatarImageView, _usernameLabel);
+    NSDictionary *views = NSDictionaryOfVariableBindings(_gravatarImageView, _displayNameLabel, _usernameLabel);
     NSDictionary *metrics = @{@"gravatarSize": @(MeHeaderViewGravatarSize),
                               @"labelHeight":@(MeHeaderViewLabelHeight),
+                              @"verticalSpacing":@(MeHeaderViewVerticalSpacing),
                               @"verticalMargin":@(MeHeaderViewVerticalMargin)};
-    [self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-verticalMargin-[_gravatarImageView(gravatarSize)]-verticalMargin-[_usernameLabel(labelHeight)]"
+    [self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-verticalMargin-[_gravatarImageView(gravatarSize)]-verticalSpacing-[_displayNameLabel(labelHeight)][_usernameLabel(labelHeight)]-verticalMargin-|"
                                                                  options:0
                                                                  metrics:metrics
                                                                    views:views]];
@@ -68,6 +80,14 @@ const CGFloat MeHeaderViewVerticalMargin = 10.0;
                                                                    views:views]];
 
     [self addConstraint:[NSLayoutConstraint constraintWithItem:self.gravatarImageView
+                                                     attribute:NSLayoutAttributeCenterX
+                                                     relatedBy:NSLayoutRelationEqual
+                                                        toItem:self
+                                                     attribute:NSLayoutAttributeCenterX
+                                                    multiplier:1
+                                                      constant:0]];
+
+    [self addConstraint:[NSLayoutConstraint constraintWithItem:self.displayNameLabel
                                                      attribute:NSLayoutAttributeCenterX
                                                      relatedBy:NSLayoutRelationEqual
                                                         toItem:self
@@ -86,6 +106,21 @@ const CGFloat MeHeaderViewVerticalMargin = 10.0;
 }
 
 #pragma mark - Subview factories
+
+- (UILabel *)labelForDisplayName
+{
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.numberOfLines = 1;
+    label.backgroundColor = [UIColor clearColor];
+    label.opaque = YES;
+    label.textColor = [WPStyleGuide darkGrey];
+    label.font = [WPStyleGuide regularTextFontSemiBold];
+    label.adjustsFontSizeToFitWidth = NO;
+    label.textAlignment = NSTextAlignmentCenter;
+
+    return label;
+}
 
 - (UILabel *)labelForUsername
 {

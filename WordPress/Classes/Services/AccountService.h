@@ -6,7 +6,7 @@
 extern NSString *const WPAccountDefaultWordPressComAccountChangedNotification;
 extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
 
-@interface AccountService : NSObject <LocalCoreDataService>
+@interface AccountService : LocalCoreDataService
 
 ///------------------------------------
 /// @name Default WordPress.com account
@@ -33,7 +33,7 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
 - (void)setDefaultWordPressComAccount:(WPAccount *)account;
 
 /**
- Removes the default WordPress.com account
+ Removes the default WordPress.com account. Should only be called from the Main Thread
  
  @see defaultWordPressComAccount
  @see setDefaultWordPressComAccount:
@@ -54,26 +54,9 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
  @param username the WordPress.com account's username
  @param authToken the OAuth2 token returned by signIntoWordPressDotComWithUsername:authToken:
  @return a WordPress.com `WPAccount` object for the given `username`
- @see createOrUpdateWordPressComAccountWithUsername:authToken:
  */
-- (WPAccount *)createOrUpdateWordPressComAccountWithUsername:(NSString *)username
-                                                   authToken:(NSString *)authToken;
-
-/**
- Creates a new self hosted account or updates the password if there is a matching account
- 
- There can only be one account per XML-RPC endpoint and username, so if one already exists its password is updated
- 
- @param xmlrpc the account XML-RPC endpoint
- @param username the account's username
- @param password the account's password
- @param context the NSManagedObjectContext used to create or update the account
- @return a `WPAccount` object for the given `xmlrpc` endpoint and `username`
- */
-- (WPAccount *)createOrUpdateSelfHostedAccountWithXmlrpc:(NSString *)xmlrpc
-                                                username:(NSString *)username
-                                             andPassword:(NSString *)password;
-
+- (WPAccount *)createOrUpdateAccountWithUsername:(NSString *)username
+                                       authToken:(NSString *)authToken;
 
 - (NSUInteger)numberOfAccounts;
 
@@ -83,18 +66,21 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
  @param username the account's username
  @return a `WPAccount` object if there's one for the specified username. Otherwise it returns nil
  */
-- (WPAccount *)findWordPressComAccountWithUsername:(NSString *)username;
+- (WPAccount *)findAccountWithUsername:(NSString *)username;
 
 /**
- Updates email and defaultBlog fields for a WordPress.com WPAccount using /me endpoint
+ Updates user details including username, email, userID, avatarURL, and default blog.
 
- @param account WordPress.com WPAccount desired to be updated
+ @param account WPAccount to be updated
  */
-- (void)updateEmailAndDefaultBlogForWordPressComAccount:(WPAccount *)account;
+- (void)updateUserDetailsForAccount:(WPAccount *)account success:(void (^)())success failure:(void (^)(NSError *error))failure;
 
 /**
- Removes your default WordPress.com password from the keychain, if needed.
+ Removes an account if it won't be used anymore.
+ 
+ For self hosted accounts, the account will be removed if there are no associated blogs
+ For WordPress.com accounts, the account will be removed if it's not the default account and there are no associated blogs
  */
-- (void)removeWordPressComAccountPasswordIfNeeded;
+- (void)purgeAccount:(WPAccount *)account;
 
 @end

@@ -1,6 +1,7 @@
 #import "ReaderPostRichContentView.h"
 #import "WPRichTextView.h"
 #import <DTCoreText/DTCoreText.h>
+#import "OriginalSiteAttributionView.h"
 
 @interface ReaderPostRichContentView()<WPRichTextViewDelegate>
 
@@ -9,6 +10,8 @@
 @end
 
 @implementation ReaderPostRichContentView
+
+@dynamic delegate;
 
 #pragma mark - Life Cycle Methods
 
@@ -51,6 +54,19 @@
     self.featuredImageView.userInteractionEnabled = YES;
 }
 
+- (void)buildDiscoverAttributionView
+{
+    // Return a ui lable subclass implementing the necessary protocol
+    OriginalSiteAttributionView *originalAttributionView = [OriginalSiteAttributionView new];
+    originalAttributionView.translatesAutoresizingMaskIntoConstraints = NO;
+    originalAttributionView.userInteractionEnabled = YES;
+    UITapGestureRecognizer *tgr = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(didTapDiscoverAttribution:)];
+    [originalAttributionView addGestureRecognizer:tgr];
+
+    self.discoverPostAttributionView = originalAttributionView;
+    [self addSubview:self.discoverPostAttributionView];
+}
+
 - (void)configureContentView
 {
     NSString *content = [self.contentProvider contentForDisplay];
@@ -71,6 +87,20 @@
 - (CGFloat)horizontalMarginForContent
 {
     return 0;
+}
+
+- (NSDictionary *)attributesForAttributedStringForTitle
+{
+    CGFloat fontSize = [UIDevice isPad] ? 32.0 : 18.0;
+    UIFont *font = [WPFontManager merriweatherBoldFontOfSize:fontSize];
+
+    CGFloat lineHeight = [UIDevice isPad] ? 40.0 : 24.0;
+    NSMutableParagraphStyle *paragraphStyle = [NSMutableParagraphStyle new];
+    [paragraphStyle setMaximumLineHeight:lineHeight];
+    [paragraphStyle setMinimumLineHeight:lineHeight];
+
+    return @{NSParagraphStyleAttributeName : paragraphStyle,
+             NSFontAttributeName : font};
 }
 
 #pragma mark - Action Methods

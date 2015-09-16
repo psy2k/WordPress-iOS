@@ -5,6 +5,7 @@ import Foundation
 {
     // MARK: - Public Properties
     public var onUrlClick: ((NSURL) -> Void)?
+    public var onAttachmentClick: ((NSTextAttachment) -> Void)?
     public var attributedText: NSAttributedString? {
         set {
             textView.attributedText = newValue
@@ -15,7 +16,7 @@ import Foundation
         }
     }
     
-    public var isBadge: Bool = false {
+    public override var isBadge: Bool {
         didSet {
             backgroundColor = WPStyleGuide.Notifications.blockBackgroundColorForRichText(isBadge)
         }
@@ -29,7 +30,7 @@ import Foundation
         }
     }
     
-    public var dataDetectors: UIDataDetectorTypes? {
+    public var dataDetectors: UIDataDetectorTypes {
         set {
             textView.dataDetectorTypes = newValue ?? .None
         }
@@ -39,7 +40,7 @@ import Foundation
     }
     
     public var labelPadding: UIEdgeInsets {
-        return privateLabelPadding
+        return self.dynamicType.defaultLabelPadding
     }
     
     public var isTextViewSelectable: Bool {
@@ -50,7 +51,15 @@ import Foundation
             return textView.selectable
         }
     }
-    
+
+    public var isTextViewClickable: Bool {
+        set {
+            textView.userInteractionEnabled = newValue
+        }
+        get {
+            return textView.userInteractionEnabled
+        }
+    }
     
     // MARK: - View Methods
     public override func awakeFromNib() {
@@ -69,12 +78,12 @@ import Foundation
         textView.dataSource         = self
         textView.delegate           = self
         
-        textView.setTranslatesAutoresizingMaskIntoConstraints(false)
+        textView.translatesAutoresizingMaskIntoConstraints = false
     }
     
     public override func layoutSubviews() {
         // Calculate the TextView's width, before hitting layoutSubviews!
-        textView.preferredMaxLayoutWidth = min(bounds.width, maxWidth) - labelPadding.left - labelPadding.right
+        textView.preferredMaxLayoutWidth = min(bounds.width, self.dynamicType.maxWidth) - labelPadding.left - labelPadding.right
         super.layoutSubviews()
     }
         
@@ -88,9 +97,14 @@ import Foundation
         onUrlClick?(link)
     }
     
+    public func textView(textView: UITextView, shouldInteractWithTextAttachment textAttachment: NSTextAttachment, inRange characterRange: NSRange) -> Bool {
+        onAttachmentClick?(textAttachment)
+        return false
+    }
+    
     // MARK: - Constants
-    private let maxWidth            = WPTableViewFixedWidth
-    private let privateLabelPadding = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+    public static let maxWidth            = WPTableViewFixedWidth
+    public static let defaultLabelPadding = UIEdgeInsets(top: 0.0, left: 12.0, bottom: 0.0, right: 12.0)
     
     // MARK: - IBOutlets
     @IBOutlet private weak var textView: RichTextView!

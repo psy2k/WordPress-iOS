@@ -23,7 +23,7 @@ class WPRichTextImage : UIControl, WPRichTextMediaAttachment {
 
     override init(frame: CGRect) {
         imageView = UIImageView(frame: CGRectMake(0, 0, frame.width, frame.height));
-        imageView.autoresizingMask = .FlexibleWidth | .FlexibleHeight
+        imageView.autoresizingMask = [.FlexibleWidth, .FlexibleHeight]
         imageView.contentMode = .ScaleAspectFit
 
         super.init(frame: frame)
@@ -31,10 +31,10 @@ class WPRichTextImage : UIControl, WPRichTextMediaAttachment {
         addSubview(imageView)
     }
 
-    required init(coder aDecoder: NSCoder) {
-        imageView = aDecoder.decodeObjectForKey(UIImage.classNameWithoutNamespaces()) as UIImageView
-        contentURL = aDecoder.decodeObjectForKey("contentURL") as NSURL?
-        linkURL = aDecoder.decodeObjectForKey("linkURL") as NSURL?
+    required init?(coder aDecoder: NSCoder) {
+        imageView = aDecoder.decodeObjectForKey(UIImage.classNameWithoutNamespaces()) as! UIImageView
+        contentURL = aDecoder.decodeObjectForKey("contentURL") as! NSURL?
+        linkURL = aDecoder.decodeObjectForKey("linkURL") as! NSURL?
 
         super.init(coder: aDecoder)
     }

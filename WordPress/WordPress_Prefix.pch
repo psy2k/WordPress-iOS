@@ -13,7 +13,7 @@
 
 	// 3rd Party
     #import <AFNetworking/AFNetworking.h>
-	#import <CocoaLumberjack/DDLog.h>
+	#import <CocoaLumberjack/CocoaLumberjack.h>
     #import <NSObject+SafeExpectations.h>
     #import <WordPressCom-Analytics-iOS/WPAnalytics.h>
     #import <WordPress-iOS-Shared/WPStyleGuide.h>
@@ -22,6 +22,7 @@
     #import "NSString+Util.h"
     #import "WPError.h"
     #import "UIColor+Helpers.h"
+    #import "WPMapFilterReduce.h"
 
 #ifndef IS_IPAD
 #define IS_IPAD   ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad)

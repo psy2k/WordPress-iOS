@@ -2,6 +2,7 @@
 //
 // + (No Title)
 // | View Site
+// | WP Admin
 // | Stats
 //
 // + Publish
@@ -11,42 +12,41 @@
 //
 // + Configuration
 // | Edit Site
-//
-// + Admin
-// | View Admin
 
 #import "BlogDetailsViewController.h"
-#import "Blog+Jetpack.h"
-#import "EditSiteViewController.h"
-#import "PagesViewController.h"
+#import "SiteSettingsViewController.h"
 #import "CommentsViewController.h"
 #import "ThemeBrowserViewController.h"
-#import "MediaBrowserViewController.h"
 #import "StatsViewController.h"
 #import "WPWebViewController.h"
 #import "WPTableViewCell.h"
 #import "ContextManager.h"
+#import "AccountService.h"
 #import "BlogService.h"
-#import "WPTableViewSectionHeaderView.h"
+#import "WPTableViewSectionHeaderFooterView.h"
 #import "BlogDetailHeaderView.h"
 #import "ReachabilityUtils.h"
+#import "WPAccount.h"
+#import "PostListViewController.h"
+#import "PageListViewController.h"
+#import "WPThemeSettings.h"
+#import "WPGUIConstants.h"
 
-const typedef enum {
-    BlogDetailsRowViewSite = 0,
-    BlogDetailsRowStats = 1,
-    BlogDetailsRowBlogPosts = 0,
-    BlogDetailsRowPages = 1,
-    BlogDetailsRowComments = 2,
-    BlogDetailsRowEditSite = 0,
-    BlogDetailsRowViewAdmin = 0
-} BlogDetailsRow;
+const NSInteger BlogDetailsRowViewSite = 0;
+const NSInteger BlogDetailsRowViewAdmin = 1;
+const NSInteger BlogDetailsRowStats = 2;
+const NSInteger BlogDetailsRowBlogPosts = 0;
+const NSInteger BlogDetailsRowPages = 1;
+const NSInteger BlogDetailsRowComments = 2;
+const NSInteger BlogDetailsRowEditSite = 0;
 
-const typedef enum {
+typedef NS_ENUM(NSInteger, TableSectionContentType) {
     TableViewSectionGeneralType = 0,
     TableViewSectionPublishType,
+    TableViewSectionAppearance,
     TableViewSectionConfigurationType,
-    TableViewSectionAdmin
-} TableSectionContentType;
+    TableViewSectionCount
+};
 
 static NSString *const BlogDetailsCellIdentifier = @"BlogDetailsCell";
 NSString * const WPBlogDetailsRestorationID = @"WPBlogDetailsID";
@@ -54,14 +54,27 @@ NSString * const WPBlogDetailsBlogKey = @"WPBlogDetailsBlogKey";
 NSInteger const BlogDetailHeaderViewHorizontalMarginiPhone = 15;
 NSInteger const BlogDetailHeaderViewVerticalMargin = 18;
 
-NSInteger const BlogDetailsRowCountForSectionGeneralType = 2;
+NSInteger const BlogDetailsRowCountForSectionGeneralType = 3;
 NSInteger const BlogDetailsRowCountForSectionPublishType = 3;
+NSInteger const BlogDetailsRowCountForSectionAppearance = 1;
 NSInteger const BlogDetailsRowCountForSectionConfigurationType = 1;
-NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
 
-@interface BlogDetailsViewController ()
+@interface BlogDetailsViewController () <UIActionSheetDelegate, UIAlertViewDelegate>
 
 @property (nonatomic, strong) BlogDetailHeaderView *headerView;
+@property (nonatomic, weak) UIActionSheet *removeSiteActionSheet;
+@property (nonatomic, weak) UIAlertView *removeSiteAlertView;
+@property (nonatomic, strong) NSArray *tableSections;
+
+/**
+ *  @brief      Property to store the themes-enabled state when the VC opens.
+ *  @details    The reason it's important to store this in a property as opposed to checking if
+ *              themes are enabled in real time, is that this VC is not ready to update the themes
+ *              feature visibility if it's changed when this VC is open.  This is not a big problem
+ *              though since this feature exists only for testing purposes, but it could still crash
+ *              the app if not handled properly.
+ */
+@property (nonatomic, assign, readwrite, getter=areThemesEnabled) BOOL themesEnabled;
 
 @end
 
@@ -93,6 +106,13 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
     return viewController;
 }
 
+- (void)dealloc
+{
+    self.removeSiteActionSheet.delegate = nil;
+    self.removeSiteAlertView.delegate = nil;
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
 - (id)initWithStyle:(UITableViewStyle)style
 {
     self = [super initWithStyle:UITableViewStyleGrouped];
@@ -112,17 +132,40 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+    
+    self.tableSections = @[@(TableViewSectionGeneralType),
+                           @(TableViewSectionPublishType)
+                          ];
+    
+    self.themesEnabled = [WPThemeSettings isEnabled];
+    if (self.themesEnabled) {
+        self.tableSections = [self.tableSections arrayByAddingObject:@(TableViewSectionAppearance)];
+    }
 
+    self.tableSections = [self.tableSections arrayByAddingObject:@(TableViewSectionConfigurationType)];
+    
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
     [self.tableView registerClass:[WPTableViewCell class] forCellReuseIdentifier:BlogDetailsCellIdentifier];
 
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+    [blogService syncBlog:_blog];
+    if (self.blog.account && !self.blog.account.userID) {
+        // User's who upgrade may not have a userID recorded.
+        AccountService *acctService = [[AccountService alloc] initWithManagedObjectContext:context];
+        [acctService updateUserDetailsForAccount:self.blog.account success:nil failure:nil];
+    }
 
-    [blogService syncBlog:_blog success:nil failure:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleDataModelChange:)
+                                                 name:NSManagedObjectContextObjectsDidChangeNotification
+                                               object:context];
 
     [self configureBlogDetailHeader];
     [self.headerView setBlog:_blog];
+
+    UIBarButtonItem *backButton = [[UIBarButtonItem alloc] initWithTitle:self.blog.blogName style:UIBarButtonItemStylePlain target:nil action:nil];
+    self.navigationItem.backBarButtonItem = backButton;
 }
 
 - (void)configureBlogDetailHeader
@@ -148,7 +191,7 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
                                                                   relatedBy:NSLayoutRelationEqual
                                                                      toItem:nil
                                                                   attribute:NSLayoutAttributeNotAnAttribute
-                                                                 multiplier:1.f
+                                                                 multiplier:1.0
                                                                    constant:headerWidth]];
         // Center the headerView inside the wrapper
         [headerWrapper addConstraint:[NSLayoutConstraint constraintWithItem:self.headerView
@@ -156,14 +199,8 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
                                                                   relatedBy:NSLayoutRelationEqual
                                                                      toItem:headerWrapper
                                                                   attribute:NSLayoutAttributeCenterX
-                                                                 multiplier:1.f
-                                                                   constant:0.f]];
-        // Then, horizontally constrain the headerWrapper
-        [self.view addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"|-[headerWrapper]-|"
-                                                                          options:0
-                                                                          metrics:metrics
-                                                                            views:views]];
-        
+                                                                 multiplier:1.0
+                                                                   constant:0.0]];
     } else {
         // Pin the headerWrapper to its superview AND wrap the headerView in horizontal margins
         [headerWrapper addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"|-(horizontalMargin)-[_headerView]-(horizontalMargin)-|"
@@ -182,6 +219,7 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
+    [self.headerView setBlog:self.blog];
     [self.tableView reloadData];
 }
 
@@ -194,19 +232,25 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
-    return 4;
+    return self.tableSections.count;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    if (section == TableViewSectionGeneralType) {
-        return BlogDetailsRowCountForSectionGeneralType;
-    } else if (section == TableViewSectionPublishType) {
-        return BlogDetailsRowCountForSectionPublishType;
-    } else if (section == TableViewSectionConfigurationType) {
-        return BlogDetailsRowCountForSectionConfigurationType;
-    } else if (section == TableViewSectionAdmin) {
-        return BlogDetailsRowCountForSectionAdmin;
+    NSInteger realSection = [self.tableSections[section] integerValue];
+    switch (realSection) {
+        case TableViewSectionGeneralType:
+            return BlogDetailsRowCountForSectionGeneralType;
+            break;
+        case TableViewSectionPublishType:
+            return BlogDetailsRowCountForSectionPublishType;
+            break;
+        case TableViewSectionAppearance:
+            return BlogDetailsRowCountForSectionAppearance;
+            break;
+        case TableViewSectionConfigurationType:
+            return BlogDetailsRowCountForSectionConfigurationType;
+            break;
     }
 
     return 0;
@@ -214,50 +258,56 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
 
 - (void)configureCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
 {
-    if (indexPath.section == TableViewSectionGeneralType) {
-        switch (indexPath.row) {
-            case BlogDetailsRowViewSite:
-                cell.textLabel.text = NSLocalizedString(@"View Site", nil);
-                cell.imageView.image = [UIImage imageNamed:@"icon-menu-viewsite"];
-                break;
-            case BlogDetailsRowStats:
-                cell.textLabel.text = NSLocalizedString(@"Stats", nil);
-                cell.imageView.image = [UIImage imageNamed:@"icon-menu-stats"];
-                break;
-            default:
-                break;
-        }
-    } else if (indexPath.section == TableViewSectionPublishType) {
-        switch (indexPath.row) {
-            case BlogDetailsRowBlogPosts:
-                cell.textLabel.text = NSLocalizedString(@"Blog Posts", nil);
-                cell.imageView.image = [UIImage imageNamed:@"icon-menu-posts"];
-                break;
-            case BlogDetailsRowPages:
-                cell.textLabel.text = NSLocalizedString(@"Pages", nil);
-                cell.imageView.image = [UIImage imageNamed:@"icon-menu-pages"];
-                break;
-            case BlogDetailsRowComments:
-                cell.textLabel.text = NSLocalizedString(@"Comments", nil);
-                cell.imageView.image = [UIImage imageNamed:@"icon-menu-comments"];
-                NSUInteger numberOfPendingComments = [self.blog numberOfPendingComments];
-                if (numberOfPendingComments > 0) {
-                    cell.detailTextLabel.text = [NSString stringWithFormat:@"%d", numberOfPendingComments];
-                }
-                break;
-            default:
-                break;
-        }
-    } else if (indexPath.section == TableViewSectionConfigurationType) {
-        if (indexPath.row == BlogDetailsRowEditSite) {
+    NSInteger section = [self.tableSections[indexPath.section] integerValue];
+    switch (section) {
+        case TableViewSectionGeneralType:
+            switch (indexPath.row) {
+                case BlogDetailsRowViewSite:
+                    cell.textLabel.text = NSLocalizedString(@"View Site", nil);
+                    cell.imageView.image = [UIImage imageNamed:@"icon-menu-viewsite"];
+                    break;
+                case BlogDetailsRowViewAdmin:
+                    cell.textLabel.text = NSLocalizedString(@"WP Admin", nil);
+                    cell.imageView.image = [UIImage imageNamed:@"icon-menu-viewadmin"];
+                    break;
+                case BlogDetailsRowStats:
+                    cell.textLabel.text = NSLocalizedString(@"Stats", nil);
+                    cell.imageView.image = [UIImage imageNamed:@"icon-menu-stats"];
+                    break;
+                default:
+                    break;
+            }
+            break;
+        case TableViewSectionPublishType:
+            switch (indexPath.row) {
+                case BlogDetailsRowBlogPosts:
+                    cell.textLabel.text = NSLocalizedString(@"Blog Posts", nil);
+                    cell.imageView.image = [UIImage imageNamed:@"icon-menu-posts"];
+                    break;
+                case BlogDetailsRowPages:
+                    cell.textLabel.text = NSLocalizedString(@"Pages", nil);
+                    cell.imageView.image = [UIImage imageNamed:@"icon-menu-pages"];
+                    break;
+                case BlogDetailsRowComments:
+                    cell.textLabel.text = NSLocalizedString(@"Comments", nil);
+                    cell.imageView.image = [UIImage imageNamed:@"icon-menu-comments"];
+                    NSUInteger numberOfPendingComments = [self.blog numberOfPendingComments];
+                    if (numberOfPendingComments > 0) {
+                        cell.detailTextLabel.text = [NSString stringWithFormat:@"%d", numberOfPendingComments];
+                    }
+                    break;
+                default:
+                    break;
+            }
+            break;
+        case TableViewSectionAppearance:
+            cell.textLabel.text = NSLocalizedString(@"Themes", @"Themes option in the blog details");
+            cell.imageView.image = [UIImage imageNamed:@"icon-menu-theme"];
+            break;
+        case TableViewSectionConfigurationType:
             cell.textLabel.text = NSLocalizedString(@"Settings", nil);
             cell.imageView.image = [UIImage imageNamed:@"icon-menu-settings"];
-        }
-    } else if (indexPath.section == TableViewSectionAdmin) {
-        if (indexPath.row == BlogDetailsRowViewAdmin) {
-            cell.textLabel.text = NSLocalizedString(@"View Admin", nil);
-            cell.imageView.image = [UIImage imageNamed:@"icon-menu-viewadmin"];
-        }
+            break;
     }
 }
 
@@ -265,8 +315,9 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
 {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:BlogDetailsCellIdentifier];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    [self configureCell:cell atIndexPath:indexPath];
+    cell.textLabel.textAlignment = NSTextAlignmentLeft;
     [WPStyleGuide configureTableViewCell:cell];
+    [self configureCell:cell atIndexPath:indexPath];
 
     return cell;
 }
@@ -275,131 +326,154 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    if (indexPath.section == TableViewSectionConfigurationType && indexPath.row == BlogDetailsRowEditSite) {
-        EditSiteViewController *editSiteViewController = [[EditSiteViewController alloc] initWithBlog:self.blog];
-        [self.navigationController pushViewController:editSiteViewController animated:YES];
+    NSInteger section = [self.tableSections[indexPath.section] integerValue];
+    switch (section) {
+        case TableViewSectionGeneralType:
+            switch (indexPath.row) {
+                case BlogDetailsRowViewSite:
+                    [self showViewSiteForBlog:self.blog];
+                    break;
+                case BlogDetailsRowViewAdmin:
+                    [self showViewAdminForBlog:self.blog];
+                    break;
+                case BlogDetailsRowStats:
+                    [self showStatsForBlog:self.blog];
+                    break;
+                default:
+                    NSAssert(false, @"Row Handling not implemented");
+                    break;
+            }
+            break;
+        case TableViewSectionPublishType:
+            switch (indexPath.row) {
+                case BlogDetailsRowBlogPosts:
+                    [self showPostListForBlog:self.blog];
+                    break;
+                case BlogDetailsRowPages:
+                    [self showPageListForBlog:self.blog];
+                    break;
+                case BlogDetailsRowComments:
+                    [self showCommentsForBlog:self.blog];
+                    break;
+                default:
+                    NSAssert(false, @"Row Handling not implemented");
+                    break;
+            }
+            break;
+        case TableViewSectionAppearance:
+            
+            break;
+        case TableViewSectionConfigurationType:
+            switch (indexPath.row) {
+                case BlogDetailsRowEditSite:
+                    [self showSettingsForBlog:self.blog];
+                    break;
+                default:
+                    NSAssert(false, @"Row Handling not implemented");
+                    break;
+            }
+            break;
     }
-
-    Class controllerClass;
-    if (indexPath.section == TableViewSectionGeneralType) {
-        switch (indexPath.row) {
-            case BlogDetailsRowViewSite:
-                [self showViewSiteForBlog:self.blog];
-                break;
-            case BlogDetailsRowStats:
-                [WPAnalytics track:WPAnalyticsStatStatsAccessed];
-                controllerClass =  [StatsViewController class];
-                break;
-            default:
-                break;
-        }
-    } else if (indexPath.section == TableViewSectionPublishType) {
-        switch (indexPath.row) {
-            case BlogDetailsRowBlogPosts:
-                [WPAnalytics track:WPAnalyticsStatOpenedPosts];
-                controllerClass = [PostsViewController class];
-                break;
-            case BlogDetailsRowPages:
-                [WPAnalytics track:WPAnalyticsStatOpenedPages];
-                controllerClass = [PagesViewController class];
-                break;
-            case BlogDetailsRowComments:
-                [WPAnalytics track:WPAnalyticsStatOpenedComments];
-                controllerClass = [CommentsViewController class];
-                break;
-            default:
-                break;
-        }
-    } else if (indexPath.section == TableViewSectionAdmin) {
-        if (indexPath.row == BlogDetailsRowViewAdmin) {
-            [self showViewAdminForBlog:self.blog];
-        }
-    }
-
-    // Check if the controller is already on the screen
-    if ([self.navigationController.visibleViewController isMemberOfClass:controllerClass]) {
-        if ([self.navigationController.visibleViewController respondsToSelector:@selector(setBlog:)]) {
-            [self.navigationController.visibleViewController performSelector:@selector(setBlog:) withObject:self.blog];
-        }
-        [self.navigationController popToRootViewControllerAnimated:NO];
-
-        return;
-    }
-
-    UIViewController *viewController = (UIViewController *)[[controllerClass alloc] init];
-    viewController.restorationIdentifier = NSStringFromClass(controllerClass);
-    viewController.restorationClass = controllerClass;
-    if ([viewController respondsToSelector:@selector(setBlog:)]) {
-        [viewController performSelector:@selector(setBlog:) withObject:self.blog];
-        [self.navigationController pushViewController:viewController animated:YES];
-    }
-
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return 48;
+    return WPTableViewDefaultRowHeight;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
     NSString *title = [self tableView:self.tableView titleForHeaderInSection:section];
-    return [WPTableViewSectionHeaderView heightForTitle:title andWidth:CGRectGetWidth(self.view.bounds)];
+    return [WPTableViewSectionHeaderFooterView heightForHeader:title width:CGRectGetWidth(self.view.bounds)];
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
     NSString *title = [self tableView:self.tableView titleForHeaderInSection:section];
-    if (title.length > 0) {
-        WPTableViewSectionHeaderView *header = [[WPTableViewSectionHeaderView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.view.bounds), 0)];
-        header.title = title;
-        return header;
+    if (title.length == 0) {
+        return nil;
     }
-    return nil;
+    
+    WPTableViewSectionHeaderFooterView *header = [[WPTableViewSectionHeaderFooterView alloc] initWithReuseIdentifier:nil style:WPTableViewSectionStyleHeader];
+    header.title = title;
+    return header;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
     NSString *headingTitle = nil;
-    if (section == TableViewSectionPublishType) {
-        headingTitle = NSLocalizedString(@"Publish", @"");
-    } else if (section == TableViewSectionConfigurationType) {
-        headingTitle = NSLocalizedString(@"Configuration", @"");
-    } else if (section == TableViewSectionAdmin) {
-        headingTitle = NSLocalizedString(@"Admin", @"");
+    NSInteger realSection = [self.tableSections[section] integerValue];
+    switch (realSection) {
+        case TableViewSectionGeneralType:
+            // no header here
+        break;
+        case TableViewSectionPublishType:
+            headingTitle = NSLocalizedString(@"Publish", @"Section title for the publish table section in the blog details screen");
+        break;
+        case TableViewSectionAppearance:
+            headingTitle = NSLocalizedString(@"Appearance",
+                                             @"Section title for the appearance table section in the" \
+                                             " blog details screen.");
+        break;
+        case TableViewSectionConfigurationType:
+            headingTitle = NSLocalizedString(@"Configuration", @"Section title for the configuration table section in the blog details screen");
+        break;
     }
-
     return headingTitle;
 }
 
 #pragma mark - Private methods
+
+- (void)showCommentsForBlog:(Blog *)blog
+{
+    [WPAnalytics track:WPAnalyticsStatOpenedComments];
+    CommentsViewController *controller = [[CommentsViewController alloc] initWithStyle:UITableViewStyleGrouped];
+    controller.blog = blog;
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)showPostListForBlog:(Blog *)blog
+{
+    [WPAnalytics track:WPAnalyticsStatOpenedPosts];
+    PostListViewController *controller = [PostListViewController controllerWithBlog:blog];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)showPageListForBlog:(Blog *)blog
+{
+    [WPAnalytics track:WPAnalyticsStatOpenedPages];
+    PageListViewController *controller = [PageListViewController controllerWithBlog:blog];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)showSettingsForBlog:(Blog *)blog
+{
+    [WPAnalytics track:WPAnalyticsStatOpenedSettings];
+    SiteSettingsViewController *controller = [[SiteSettingsViewController alloc] initWithBlog:blog];
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)showStatsForBlog:(Blog *)blog
+{
+    [WPAnalytics track:WPAnalyticsStatStatsAccessed];
+    StatsViewController *statsView = [StatsViewController new];
+    statsView.blog = blog;
+    [self.navigationController pushViewController:statsView animated:YES];
+}
+
 - (void)showViewSiteForBlog:(Blog *)blog
 {
     [WPAnalytics track:WPAnalyticsStatOpenedViewSite];
 
-    NSString *blogURL = blog.homeURL;
-    if (![blogURL hasPrefix:@"http"]) {
-        blogURL = [NSString stringWithFormat:@"http://%@", blogURL];
-    } else if ([blog isWPcom] && [blog.url rangeOfString:@"wordpress.com"].location == NSNotFound) {
-        blogURL = [blog.xmlrpc stringByReplacingOccurrencesOfString:@"xmlrpc.php" withString:@""];
-    }
-
-    // Check if the same site already loaded
-    if ([self.navigationController.visibleViewController isMemberOfClass:[WPWebViewController class]] &&
-        [((WPWebViewController*)self.navigationController.visibleViewController).url.absoluteString isEqual:blogURL]) {
-        // Do nothing
-    } else {
-        WPWebViewController *webViewController = [[WPWebViewController alloc] init];
-        webViewController.url = [NSURL URLWithString:blogURL];
-        if (blog.isPrivate) {
-            webViewController.authToken = blog.authToken;
-            webViewController.username = blog.username;
-            webViewController.password = blog.password;
-            webViewController.wpLoginURL = [NSURL URLWithString:blog.loginUrl];
-        }
-        [self.navigationController pushViewController:webViewController animated:YES];
-    }
-    return;
+    NSURL *targetURL = [NSURL URLWithString:blog.homeURL];
+    WPWebViewController *webViewController = [WPWebViewController webViewControllerWithURL:targetURL];
+    webViewController.authToken = blog.authToken;
+    webViewController.username = blog.usernameForSite;
+    webViewController.password = blog.password;
+    webViewController.wpLoginURL = [NSURL URLWithString:blog.loginUrl];
+    
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:webViewController];
+    [self presentViewController:navController animated:YES completion:nil];
 }
 
 - (void)showViewAdminForBlog:(Blog *)blog
@@ -413,6 +487,24 @@ NSInteger const BlogDetailsRowCountForSectionAdmin = 1;
 
     NSString *dashboardUrl = [blog.xmlrpc stringByReplacingOccurrencesOfString:@"xmlrpc.php" withString:@"wp-admin/"];
     [[UIApplication sharedApplication] openURL:[NSURL URLWithString:dashboardUrl]];
+}
+
+
+#pragma mark - Notification handlers
+
+- (void)handleDataModelChange:(NSNotification *)note
+{
+    NSSet *deletedObjects = note.userInfo[NSDeletedObjectsKey];
+    if ([deletedObjects containsObject:self.blog]) {
+        [self.navigationController popToRootViewControllerAnimated:NO];
+    }
+    
+    NSSet *updatedObjects = note.userInfo[NSUpdatedObjectsKey];
+    if ([updatedObjects containsObject:self.blog]) {
+        self.navigationItem.backBarButtonItem.title = self.blog.blogName;
+        self.navigationItem.title = self.blog.blogName;
+        [self.tableView reloadData];
+    }
 }
 
 @end

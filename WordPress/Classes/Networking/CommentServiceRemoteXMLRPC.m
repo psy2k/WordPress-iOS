@@ -3,6 +3,8 @@
 #import "RemoteComment.h"
 #import <WordPressApi.h>
 
+static const NSInteger NumberOfCommentsToSync = 100;
+
 @interface CommentServiceRemoteXMLRPC ()
 @property (nonatomic, strong) WPXMLRPCClient *api;
 @end
@@ -23,9 +25,20 @@
                    success:(void (^)(NSArray *))success
                    failure:(void (^)(NSError *))failure
 {
-    NSDictionary *extraParameters = @{
-                                     @"number": @100
-                                     };
+    [self getCommentsForBlog:blog options:nil success:success failure:failure];
+}
+
+- (void)getCommentsForBlog:(Blog *)blog
+                   options:(NSDictionary *)options
+                   success:(void (^)(NSArray *))success
+                   failure:(void (^)(NSError *))failure
+{
+    NSMutableDictionary *extraParameters = [NSMutableDictionary dictionaryWithDictionary:@{
+                                      @"number": @(NumberOfCommentsToSync)
+                                      }];
+    if (options) {
+        [extraParameters addEntriesFromDictionary:options];
+    }
     NSArray *parameters = [blog getXMLRPCArgsWithExtra:extraParameters];
     [self.api callMethod:@"wp.getComments"
               parameters:parameters
@@ -168,11 +181,9 @@
 
 - (NSArray *)remoteCommentsFromXMLRPCArray:(NSArray *)xmlrpcArray
 {
-    NSMutableArray *comments = [NSMutableArray arrayWithCapacity:xmlrpcArray.count];
-    for (NSDictionary *xmlrpcComment in xmlrpcArray) {
-        [comments addObject:[self remoteCommentFromXMLRPCDictionary:xmlrpcComment]];
-    }
-    return [NSArray arrayWithArray:comments];
+    return [xmlrpcArray wp_map:^id(NSDictionary *xmlrpcComment) {
+        return [self remoteCommentFromXMLRPCDictionary:xmlrpcComment];
+    }];
 }
 
 - (RemoteComment *)remoteCommentFromXMLRPCDictionary:(NSDictionary *)xmlrpcDictionary

@@ -17,32 +17,54 @@
 #import "WPAccount.h"
 #import "LoginViewController.h"
 #import <WordPress-iOS-Shared/WPTableViewCell.h>
-#import <WordPress-iOS-Shared/WPTableViewSectionHeaderView.h>
+#import <WordPress-iOS-Shared/WPTableViewSectionHeaderFooterView.h>
 #import "HelpshiftUtils.h"
+#import "WordPress-Swift.h"
 
-const typedef enum {
-    MeRowAccountSettings = 0,
-    MeRowHelp = 1,
-    MeRowLoginLogout = 0
-} MeRow;
 
-const typedef enum {
-    MeSectionGeneralType = 0,
-    MeSectionWpCom
-} MeSectionContentType;
+typedef NS_ENUM(NSInteger, MeSectionSections)
+{
+    MeSectionsAccount = 0,
+    MeSectionsExtra,
+    MeSectionsWpCom,
+    MeSectionsCount
+};
 
+typedef NS_ENUM(NSInteger, MeSectionAccount) {
+    MeSectionAccountSettings = 0,
+    MeSectionAccountNotifications,
+    MeSectionAccountCount
+};
+
+typedef NS_ENUM(NSInteger, MeSectionExtra) {
+    MeSectionExtraHelp = 0,
+    MeSectionExtraAbout,
+    MeSectionExtraCount
+};
+
+typedef NS_ENUM(NSInteger, MeSectionWpCom) {
+    MeSectionWpComAuthentication = 0,
+    MeSectionWpComCount
+};
+
+
+static NSString *const WPMeRestorationID = @"WPMeRestorationID";
 static NSString *const MVCCellReuseIdentifier = @"MVCCellReuseIdentifier";
 
-static CGFloat const MVCTableViewRowHeight = 50.0;
+@interface MeViewController () <UIViewControllerRestoration, UITableViewDataSource, UITableViewDelegate, UIActionSheetDelegate>
 
-@interface MeViewController () <UITableViewDataSource, UITableViewDelegate, UIActionSheetDelegate>
-
-@property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) MeHeaderView *headerView;
+@property (nonatomic, strong) UITableView   *tableView;
+@property (nonatomic, strong) MeHeaderView  *headerView;
+@property (nonatomic, strong) NSDictionary  *rowCountMap;
 
 @end
 
 @implementation MeViewController
+
++ (UIViewController *)viewControllerWithRestorationIdentifierPath:(NSArray *)identifierComponents coder:(NSCoder *)coder
+{
+    return [self new];
+}
 
 #pragma mark - LifeCycle Methods
 
@@ -55,15 +77,14 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 {
     self = [super init];
     if (self) {
+        self.title = NSLocalizedString(@"Me", @"Me page title");
+        self.restorationIdentifier = WPMeRestorationID;
+        self.restorationClass = [self class];
+
         // we want to observe for the account change notification even if the view is not visible
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(defaultAccountDidChange:)
                                                      name:WPAccountDefaultWordPressComAccountChangedNotification
-                                                   object:nil];
-
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(accountEmailUpdated:)
-                                                     name:WPAccountEmailAndDefaultBlogUpdatedNotification
                                                    object:nil];
 
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -79,15 +100,9 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
     [super viewDidLoad];
 
     [self buildTableView];
-
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-
-    // we want to keep email and default blog information up to date, this is probably the best place to do it
-    [accountService updateEmailAndDefaultBlogForWordPressComAccount:defaultAccount];
-
+    [self refreshAccountUserDetails];
     [self refreshHeaderView];
+    [self refreshTableView];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -105,7 +120,7 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleGrouped];
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
-    self.tableView.rowHeight = MVCTableViewRowHeight;
+    self.tableView.rowHeight = WPTableViewDefaultRowHeight;
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.tableView registerClass:[WPTableViewCell class] forCellReuseIdentifier:MVCCellReuseIdentifier];
     [self.view addSubview:self.tableView];
@@ -130,24 +145,69 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
                                                                         views:views]];
 }
 
-#pragma mark - Header methods
-
-- (void)refreshHeaderView
+- (void)refreshAccountUserDetails
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
     WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+    if (!defaultAccount) {
+        return;
+    }
+
+    // We want to keep email and default blog information up to date, this is a reasonable best place to do it
+    [accountService updateUserDetailsForAccount:defaultAccount success:^{
+        [self refreshHeaderViewEmail];
+    } failure:nil];
+}
+
+#pragma mark - Header methods
+
+- (void)refreshHeaderView
+{
+    WPAccount *defaultAccount = [self defaultAccount];
 
     if (defaultAccount) {
         self.tableView.tableHeaderView = self.headerView;
+        [self.headerView setDisplayName:defaultAccount.displayName];
         [self.headerView setUsername:defaultAccount.username];
         [self.headerView setGravatarEmail:defaultAccount.email];
     }
     else {
         self.tableView.tableHeaderView = nil;
     }
+}
 
+- (void)refreshHeaderViewEmail
+{
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+    [self.headerView setGravatarEmail:defaultAccount.email];
+}
+
+- (void)refreshTableView
+{
+    // Let's hide the Notifications Row, whenever there is no default account
+    NSInteger accountRowCount = MeSectionAccountCount;
+    if (!self.defaultAccount) {
+        --accountRowCount;
+    }
+    
+    self.rowCountMap = @{
+        @(MeSectionsAccount)    : @(accountRowCount),
+        @(MeSectionsExtra)      : @(MeSectionExtraCount),
+        @(MeSectionsWpCom)      : @(MeSectionWpComCount)
+    };
+    
     [self.tableView reloadData];
+}
+
+- (WPAccount *)defaultAccount
+{
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    AccountService *accountService  = [[AccountService alloc] initWithManagedObjectContext:context];
+    
+    return accountService.defaultWordPressComAccount;
 }
 
 - (UILabel *)helpshiftBadgeLabel
@@ -161,38 +221,44 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
     return label;
 }
 
+
 #pragma mark - UITableViewDataSource methods
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
-    return 2;
+    return MeSectionsCount;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    if (section == MeSectionGeneralType) {
-        return 2;
-    }
-    if (section == MeSectionWpCom) {
-        return 1;
-    }
-    return 0;
+    return [self.rowCountMap[@(section)] intValue] ?: 0;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     WPTableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:MVCCellReuseIdentifier];
-    [WPStyleGuide configureTableViewActionCell:cell];
+    [WPStyleGuide configureTableViewCell:cell];
 
-    if (indexPath.section == MeSectionGeneralType) {
+    if (indexPath.section == MeSectionsAccount) {
         switch (indexPath.row) {
-            case MeRowAccountSettings:
+            case MeSectionAccountSettings:
                 cell.textLabel.text = NSLocalizedString(@"Account Settings", @"");
+                cell.textLabel.textAlignment = NSTextAlignmentLeft;
                 cell.accessibilityLabel = @"Account Settings";
                 cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
                 break;
-            case MeRowHelp:
+            case MeSectionAccountNotifications:
+                cell.textLabel.text = NSLocalizedString(@"Notification Settings", @"");
+                cell.textLabel.textAlignment = NSTextAlignmentLeft;
+                cell.accessibilityLabel = @"Notification Settings";
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                break;
+        }
+    } else if (indexPath.section == MeSectionsExtra) {
+        switch (indexPath.row) {
+            case MeSectionExtraHelp:
                 cell.textLabel.text = NSLocalizedString(@"Help & Support", @"");
+                cell.textLabel.textAlignment = NSTextAlignmentLeft;
                 cell.accessibilityLabel = @"Help & Support";
 
                 NSInteger unreadNotificationCount = [HelpshiftUtils unreadNotificationCount];
@@ -206,17 +272,19 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
                     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
                 }
                 break;
-            default:
+            case MeSectionExtraAbout:
+                cell.textLabel.text = NSLocalizedString(@"About", @"");
+                cell.textLabel.textAlignment = NSTextAlignmentLeft;
+                cell.accessibilityLabel = @"About";
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
                 break;
         }
-    }
-    else if (indexPath.section == MeSectionWpCom) {
-        if (indexPath.row == MeRowLoginLogout) {
+    } else if (indexPath.section == MeSectionsWpCom) {
+        if (indexPath.row == MeSectionWpComAuthentication) {
             NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
             AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
             WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-
-            cell.textLabel.textAlignment = NSTextAlignmentCenter;
+            
             cell.accessoryType = UITableViewCellAccessoryNone;
 
             if (defaultAccount) {
@@ -224,12 +292,15 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
                                                             @"Label for disconnecting from WordPress.com account");
                 cell.textLabel.text = signOutString;
                 cell.accessibilityIdentifier = signOutString;
+                [WPStyleGuide configureTableViewDestructiveActionCell:cell];
             }
             else {
-                NSString *signInString = NSLocalizedString(@"Connect to WordPress.com Account",
+                NSString *signInString = NSLocalizedString(@"Connect to WordPress.com",
                                                            @"Label for connecting to WordPress.com account");
                 cell.textLabel.text = signInString;
                 cell.accessibilityIdentifier = signInString;
+                [WPStyleGuide configureTableViewActionCell:cell];
+                cell.textLabel.textAlignment = NSTextAlignmentCenter;
             }
         }
     }
@@ -238,7 +309,7 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
-    WPTableViewSectionHeaderView *header = [[WPTableViewSectionHeaderView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.view.bounds), 0)];
+    WPTableViewSectionHeaderFooterView *header = [[WPTableViewSectionHeaderFooterView alloc] initWithReuseIdentifier:nil style:WPTableViewSectionStyleHeader];
     header.title = [self titleForHeaderInSection:section];
     return header;
 }
@@ -246,12 +317,16 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
     NSString *title = [self titleForHeaderInSection:section];
-    return [WPTableViewSectionHeaderView heightForTitle:title andWidth:CGRectGetWidth(self.view.bounds)];
+    if (!title) {
+        return CGFLOAT_MIN;
+    }
+    
+    return [WPTableViewSectionHeaderFooterView heightForHeader:title width:CGRectGetWidth(self.view.bounds)];
 }
 
 - (NSString *)titleForHeaderInSection:(NSInteger)section
 {
-    if (section == MeSectionWpCom) {
+    if (section == MeSectionsWpCom) {
         return NSLocalizedString(@"WordPress.com Account", @"WordPress.com sign-in/sign-out section header title");
     }
     return nil;
@@ -263,34 +338,41 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    if (indexPath.section == MeSectionGeneralType) {
+    if (indexPath.section == MeSectionsAccount) {
         switch (indexPath.row) {
-            case MeRowAccountSettings:
-                [self navigateToSettings];
+            case MeSectionAccountSettings:
+                [self navigateToAccountSettings];
                 break;
-            case MeRowHelp:
-                [self navigateToHelp];
-                break;
-            default:
+            case MeSectionAccountNotifications:
+                [self navigateToNotificationSettings];
                 break;
         }
-    }
-    else if (indexPath.section == MeSectionWpCom) {
-        if (indexPath.row == MeRowLoginLogout) {
+    } else if (indexPath.section == MeSectionsExtra) {
+        switch (indexPath.row) {
+            case MeSectionExtraHelp:
+                [self navigateToHelp];
+                break;
+            case MeSectionExtraAbout:
+                [self navigateToAbout];
+                break;
+        }
+        
+    } else if (indexPath.section == MeSectionsWpCom) {
+        if (indexPath.row == MeSectionWpComAuthentication) {
             NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
             AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
             WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
 
             if (defaultAccount) {
                 // Present the Sign out ActionSheet
-                NSString *signOutTitle = NSLocalizedString(@"Signing out removes all of your sites associated with %@",
+                NSString *signOutTitle = NSLocalizedString(@"Disconnecting your account will remove all of @%@’s WordPress.com data from this device.",
                                                            @"Label for disconnecting WordPress.com account. The %@ is a placeholder for the user's screen name.");
                 signOutTitle = [NSString stringWithFormat:signOutTitle, [defaultAccount username]];
                 UIActionSheet *actionSheet;
                 actionSheet = [[UIActionSheet alloc] initWithTitle:signOutTitle
                                                           delegate:self
                                                  cancelButtonTitle:NSLocalizedString(@"Cancel", @"")
-                                            destructiveButtonTitle:NSLocalizedString(@"Sign Out", @"")
+                                            destructiveButtonTitle:NSLocalizedString(@"Disconnect", @"Button for confirming disconnecting WordPress.com account")
                                                  otherButtonTitles:nil];
                 actionSheet.actionSheetStyle = UIActionSheetStyleDefault;
 
@@ -304,7 +386,7 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
                 LoginViewController *loginViewController = [[LoginViewController alloc] init];
                 loginViewController.onlyDotComAllowed = YES;
                 loginViewController.cancellable = YES;
-                loginViewController.dismissBlock = ^{
+                loginViewController.dismissBlock = ^(BOOL cancelled){
                     [self dismissViewControllerAnimated:YES completion:nil];
                 };
 
@@ -317,11 +399,18 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 
 #pragma mark - Actions
 
-- (void)navigateToSettings
+- (void)navigateToAccountSettings
 {
     [WPAnalytics track:WPAnalyticsStatOpenedSettings];
 
     SettingsViewController *settingsViewController = [[SettingsViewController alloc] initWithStyle:UITableViewStyleGrouped];
+    [self.navigationController pushViewController:settingsViewController animated:YES];
+}
+
+- (void)navigateToNotificationSettings
+{
+    NSString *nibName = [NotificationSettingsViewController classNameWithoutNamespaces];
+    NotificationSettingsViewController *settingsViewController = [[NotificationSettingsViewController alloc] initWithNibName:nibName bundle:nil];
     [self.navigationController pushViewController:settingsViewController animated:YES];
 }
 
@@ -331,39 +420,40 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
     [self.navigationController pushViewController:supportViewController animated:YES];
 }
 
+- (void)navigateToAbout
+{
+    NSString *nibName               = [AboutViewController classNameWithoutNamespaces];
+    AboutViewController *aboutVC    = [[AboutViewController alloc] initWithNibName:nibName bundle:nil];
+    
+    [self.navigationController pushViewController:aboutVC animated:YES];
+}
+
+
 #pragma mark - Notifications
 
 - (void)defaultAccountDidChange:(NSNotification *)notification
 {
     [self refreshHeaderView];
+    [self refreshTableView];
 }
 
-- (void)accountEmailUpdated:(NSNotification *)notification
-{
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
 
-    // check if the updated account is the default WordPress.com account
-    if (defaultAccount == [notification object]) {
-        [self.headerView setGravatarEmail:defaultAccount.email];
-    }
-}
-
-#pragma mark -
-#pragma mark Action Sheet Delegate Methods
+#pragma mark - Action Sheet Delegate Methods
 
 - (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex
 {
     if (buttonIndex == 0) {
-        // Sign out
-        NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+        // Sign out asynchronously so the popover animation can finish on iPad #3667
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Sign out
+            NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+            AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
 
-        [accountService removeDefaultWordPressComAccount];
+            [accountService removeDefaultWordPressComAccount];
 
-        // reload all table view to update the header as well
-        [self.tableView reloadData];
+            // reload all table view to update the header as well
+            [self refreshTableView];
+        });
     }
 }
 
@@ -371,7 +461,7 @@ static CGFloat const MVCTableViewRowHeight = 50.0;
 
 - (void)helpshiftUnreadCountUpdated:(NSNotification *)notification
 {
-    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:MeRowHelp inSection:MeSectionGeneralType];
+    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:MeSectionExtraHelp inSection:MeSectionsExtra];
     [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
 }
 

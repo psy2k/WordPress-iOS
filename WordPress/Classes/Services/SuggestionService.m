@@ -59,7 +59,7 @@ NSString * const SuggestionListUpdatedNotification = @"SuggestionListUpdatedNoti
     // add this siteID to currently being requested list
     [self.siteIDsCurrentlyBeingRequested addObject:siteID];
     
-    NSString *suggestPath = @"users/suggest";
+    NSString *suggestPath = @"v1.1/users/suggest";
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
     WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
@@ -95,7 +95,7 @@ NSString * const SuggestionListUpdatedNotification = @"SuggestionListUpdatedNoti
         return NO;
     }
     
-    WordPressAppDelegate *appDelegate = [WordPressAppDelegate sharedWordPressApplicationDelegate];
+    WordPressAppDelegate *appDelegate = [WordPressAppDelegate sharedInstance];
     
     NSArray *suggestions = [self.suggestionsCache objectForKey:siteID];
     
@@ -113,11 +113,7 @@ NSString * const SuggestionListUpdatedNotification = @"SuggestionListUpdatedNoti
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     BlogService *service            = [[BlogService alloc] initWithManagedObjectContext:context];
     Blog *blog                      = [service blogByBlogId:siteID];
-    if (! blog.isWPcom) {
-        return NO;
-    }
-        
-    return YES;
+    return [blog supports:BlogFeatureMentions];
 }
 
 @end

@@ -3,27 +3,17 @@
 #import "Blog.h"
 #import "RemotePostCategory.h"
 
-@interface PostCategoryServiceRemoteREST ()
-@property (nonatomic, strong) WordPressComApi *api;
-@end
-
 @implementation PostCategoryServiceRemoteREST
-
-- (instancetype)initWithApi:(WordPressComApi *)api
-{
-    self = [super init];
-    if (self) {
-        _api = api;
-    }
-    return self;
-}
 
 - (void)getCategoriesForBlog:(Blog *)blog
                      success:(void (^)(NSArray *))success
                      failure:(void (^)(NSError *))failure
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/categories?context=edit", blog.dotComID];
-    [self.api GET:path
+    NSString *requestUrl = [self pathForEndpoint:path
+                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+    
+    [self.api GET:requestUrl
        parameters:nil
           success:^(AFHTTPRequestOperation *operation, id responseObject) {
               if (success) {
@@ -43,13 +33,16 @@
 {
     NSParameterAssert(category.name.length > 0);
     NSString *path = [NSString stringWithFormat:@"sites/%@/categories/new?context=edit", blog.dotComID];
+    NSString *requestUrl = [self pathForEndpoint:path
+                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+    
     NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
     parameters[@"name"] = category.name;
     if (category.parentID) {
         parameters[@"parent"] = category.parentID;
     }
 
-    [self.api POST:path
+    [self.api POST:requestUrl
         parameters:parameters
            success:^(AFHTTPRequestOperation *operation, id responseObject) {
                RemotePostCategory *receivedCategory = [self remoteCategoryWithJSONDictionary:responseObject];
@@ -65,11 +58,9 @@
 
 - (NSArray *)remoteCategoriesWithJSONArray:(NSArray *)jsonArray
 {
-    NSMutableArray *categories = [NSMutableArray arrayWithCapacity:jsonArray.count];
-    for (NSDictionary *jsonCategory in jsonArray) {
-        [categories addObject:[self remoteCategoryWithJSONDictionary:jsonCategory]];
-    }
-    return [NSArray arrayWithArray:categories];
+    return [jsonArray wp_map:^id(NSDictionary *jsonCategory) {
+        return [self remoteCategoryWithJSONDictionary:jsonCategory];
+    }];
 }
 
 - (RemotePostCategory *)remoteCategoryWithJSONDictionary:(NSDictionary *)jsonCategory

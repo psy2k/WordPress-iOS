@@ -2,14 +2,23 @@
 
 NSString *const WPMobileReaderURL                                   = @"https://en.wordpress.com/reader/mobile/v2/?chrome=no";
 NSString *const WPMobileReaderDetailURL                             = @"https://en.wordpress.com/reader/mobile/v2/?template=details";
-NSString *const WPMobileReaderFFURL                                 = @"https://en.wordpress.com/reader/mobile/v2/?template=friendfinder";
 
 NSString *const WPComXMLRPCUrl                                      = @"https://wordpress.com/xmlrpc.php";
 NSString *const WPComDefaultAccountUrlKey                           = @"AccountDefaultDotcom";
-NSString *const WPComDefaultAccountUsernameKey                      = @"wpcom_username_preference";
+
+NSString *const WPJetpackInformationURL                             = @"https://jetpack.me/about/";
+NSString *const WPAutomatticMainURL                                 = @"https://automattic.com/";
+NSString *const WPAutomatticTermsOfServiceURL                       = @"https://wordpress.com/tos/";
+NSString *const WPAutomatticPrivacyURL                              = @"https://automattic.com/privacy/";
+NSString *const WPAutomatticAppsBlogURL                             = @"https://apps.wordpress.org/blog/";
+NSString *const WPGithubMainURL                                     = @"https://github.com/wordpress-mobile/WordPress-iOS/";
+NSString *const WPTwitterWordPressHandle                            = @"@WordPressiOS";
+NSString *const WPTwitterWordPressMobileURL                         = @"twitter://user?screen_name=wordpressios";
+
+NSString *const WPBlavatarBaseURL                                   = @"http://gravatar.com/blavatar";
+NSString *const WPGravatarBaseURL                                   = @"http://gravatar.com/avatar";
 
 NSString *const WPNotificationsBucketName                           = @"note20";
-NSString *const WPNotificationsJetpackInformationURL                = @"http://jetpack.me/about/";
 
 #ifdef INTERNAL_BUILD
 NSString *const WPAppGroupName                                      = @"group.org.wordpress.internal";
@@ -26,14 +35,6 @@ NSString *const WPStatsTodayWidgetUserDefaultsSiteNameKey           = @"WordPres
 NSString *const WPStatsTodayWidgetUserDefaultsSiteTimeZoneKey       = @"WordPressTodayWidgetTimeZone";
 NSString *const WPStatsTodayWidgetUserDefaultsViewCountKey          = @"TodayViewCount";
 NSString *const WPStatsTodayWidgetUserDefaultsVisitorCountKey       = @"TodayVisitorCount";
-
-NSString *const WPInternalBetaShakeToPullUpFeedbackKey              = @"InternalBetaShakeToPullUpFeedback";
-
-#if defined(INTERNAL_BUILD) || defined(DEBUG)
-BOOL const WPJetpackRESTEnabled                                     = YES;
-#else
-BOOL const WPJetpackRESTEnabled                                     = NO;
-#endif
 
 NSString *const WPiTunesAppId                                       = @"335703880";
 

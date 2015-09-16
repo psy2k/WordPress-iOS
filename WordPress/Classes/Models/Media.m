@@ -1,22 +1,6 @@
 #import "Media.h"
-#import "UIImage+Resize.h"
-#import "NSString+Helpers.h"
-#import "NSString+Util.h"
-#import "AFHTTPRequestOperation.h"
-#import "ContextManager.h"
-#import <ImageIO/ImageIO.h>
 
-@interface Media (PrivateMethods)
-
-- (void)xmlrpcUploadWithSuccess:(void (^)())success failure:(void (^)(NSError *error))failure;
-- (void)xmlrpcDeleteWithSuccess:(void (^)())success failure:(void (^)(NSError *error))failure;
-- (void)xmlrpcUpdateWithSuccess:(void (^)())success failure:(void (^)(NSError *error))failure;
-
-@end
-
-@implementation Media {
-    AFHTTPRequestOperation *_uploadOperation;
-}
+@implementation Media
 
 @dynamic mediaID;
 @dynamic remoteURL;
@@ -25,7 +9,6 @@
 @dynamic width;
 @dynamic length;
 @dynamic title;
-@dynamic thumbnail;
 @dynamic height;
 @dynamic filename;
 @dynamic filesize;
@@ -37,97 +20,11 @@
 @dynamic caption;
 @dynamic desc;
 @dynamic mediaTypeString;
+@dynamic videopressGUID;
+@dynamic localThumbnailURL;
+@dynamic remoteThumbnailURL;
 
 @synthesize unattached;
-
-NSUInteger const MediaDefaultThumbnailSize = 75;
-CGFloat const MediaDefaultJPEGCompressionQuality = 0.9;
-
-+ (Media *)newMediaForPost:(AbstractPost *)post
-{
-    Media *media = [NSEntityDescription insertNewObjectForEntityForName:@"Media" inManagedObjectContext:post.managedObjectContext];
-    media.blog = post.blog;
-    media.posts = [NSMutableSet setWithObject:post];
-    media.mediaID = @0;
-    return media;
-}
-
-+ (Media *)newMediaForBlog:(Blog *)blog
-{
-    Media *media = [NSEntityDescription insertNewObjectForEntityForName:@"Media" inManagedObjectContext:blog.managedObjectContext];
-    media.blog = blog;
-    media.mediaID = @0;
-    return media;
-}
-
-+ (UIImage *)generateThumbnailFromImage:(UIImage *)theImage andSize:(CGSize)targetSize
-{
-    return [theImage thumbnailImage:MediaDefaultThumbnailSize transparentBorder:0 cornerRadius:0 interpolationQuality:kCGInterpolationHigh];
-}
-
-+ (Media *)createOrReplaceMediaFromJSON:(NSDictionary *)json forBlog:(Blog *)blog
-{
-    NSSet *existing = [blog.media filteredSetUsingPredicate:[NSPredicate predicateWithFormat:@"mediaID == %@", [json[@"attachment_id"] numericValue]]];
-    if (existing.count > 0) {
-        [existing.allObjects[0] updateFromDictionary:json];
-        return existing.allObjects[0];
-    }
-
-    Media *media = [NSEntityDescription insertNewObjectForEntityForName:NSStringFromClass(self.class) inManagedObjectContext:blog.managedObjectContext];
-    [media updateFromDictionary:json];
-    media.blog = blog;
-    return media;
-}
-
-+ (void)mergeNewMedia:(NSArray *)media forBlog:(Blog *)blog
-{
-    if ([blog isDeleted] || blog.managedObjectContext == nil) {
-        return;
-    }
-
-    NSManagedObjectContext *backgroundMOC = [[ContextManager sharedInstance] newDerivedContext];
-    [backgroundMOC performBlock:^{
-        Blog *contextBlog = (Blog *)[backgroundMOC objectWithID:blog.objectID];
-        NSMutableArray *mediaToKeep = [NSMutableArray array];
-        for (NSDictionary *item in media) {
-            Media *mediaItem = [Media createOrReplaceMediaFromJSON:item forBlog:contextBlog];
-            [mediaToKeep addObject:mediaItem];
-        }
-        NSSet *syncedMedia = contextBlog.media;
-        if (syncedMedia && (syncedMedia.count > 0)) {
-            for (Media *m in syncedMedia) {
-                if (![mediaToKeep containsObject:m] && m.remoteURL != nil) {
-                    DDLogVerbose(@"Deleting media %@", m);
-                    [backgroundMOC deleteObject:m];
-                }
-            }
-        }
-
-        [[ContextManager sharedInstance] saveDerivedContext:backgroundMOC];
-    }];
-}
-
-- (void)updateFromDictionary:(NSDictionary*)json
-{
-    self.remoteURL = [json stringForKey:@"link"];
-    self.title = [json stringForKey:@"title"];
-    self.width = [json numberForKeyPath:@"metadata.width"];
-    self.height = [json numberForKeyPath:@"metadata.height"];
-    self.mediaID = [json numberForKey:@"attachment_id"];
-    self.filename = [[json objectForKeyPath:@"metadata.file"] lastPathComponent];
-    self.creationDate = json[@"date_created_gmt"];
-    self.caption = [json stringForKey:@"caption"];
-    self.desc = [json stringForKey:@"description"];
-
-    [self mediaTypeFromUrl:[[json stringForKey:@"link"] pathExtension]];
-}
-
-- (NSDictionary*)XMLRPCDictionaryForUpdate
-{
-    return @{@"post_title": self.title ? self.title : @"",
-             @"post_content": self.desc ? self.desc : @"",
-             @"post_excerpt": self.caption ? self.caption : @""};
-}
 
 - (void)mediaTypeFromUrl:(NSString *)ext
 {
@@ -166,7 +63,8 @@ CGFloat const MediaDefaultJPEGCompressionQuality = 0.9;
     } else if ([self.mediaTypeString isEqualToString:@"document"]) {
         return MediaTypeDocument;
     } else if ([self.mediaTypeString isEqualToString:@"featured"]) {
-        return MediaTypeFeatured;
+        // this is for object that where still storing the old value.
+        return MediaTypeImage;
     }
     return MediaTypeDocument;
 }
@@ -176,9 +74,6 @@ CGFloat const MediaDefaultJPEGCompressionQuality = 0.9;
     switch (mediaType) {
         case MediaTypeImage:
             self.mediaTypeString = @"image";
-            break;
-        case MediaTypeFeatured:
-            self.mediaTypeString = @"featured";
             break;
         case MediaTypeVideo:
             self.mediaTypeString = @"video";
@@ -192,82 +87,18 @@ CGFloat const MediaDefaultJPEGCompressionQuality = 0.9;
     }
 }
 
-- (NSString *)mediaTypeName
-{
-    if (self.mediaType == MediaTypeImage) {
-        return NSLocalizedString(@"Image", @"");
-    } else if (self.mediaType == MediaTypeVideo) {
-        return NSLocalizedString(@"Video", @"");
-    }
-
-    return self.mediaTypeString;
-}
-
 - (BOOL)featured
 {
-    return self.mediaType == MediaTypeFeatured;
-}
-
-- (void)setFeatured:(BOOL)featured
-{
-    self.mediaType = featured ? MediaTypeFeatured : MediaTypeImage;
-}
-
-+ (NSString *)mediaTypeForFeaturedImage
-{
-    return @"image";
-}
-
-+ (void)bulkDeleteMedia:(NSArray *)media withSuccess:(void(^)())success failure:(void (^)(NSError *error, NSArray *failures))failure
-{
-    __block NSMutableArray *failedDeletes = [NSMutableArray array];
-    for (NSUInteger i = 0; i < media.count; i++) {
-        Media *m = media[i];
-        // Delete locally if it was never uploaded
-        if (!m.remoteURL) {
-            [m.managedObjectContext deleteObject:m];
-            if (i == media.count-1) {
-                if (success) {
-                    success();
-                }
-                return;
-            }
-            continue;
+    for (AbstractPost *post in self.posts) {
+        if ([post.post_thumbnail isEqualToNumber:self.mediaID]){
+            return YES;
         }
-
-        [m xmlrpcDeleteWithSuccess:^{
-            if (i == media.count-1) {
-                if (success) {
-                    success();
-                }
-            }
-        } failure:^(NSError *error) {
-            [failedDeletes addObject:m];
-            if (i == media.count-1) {
-                if (failure) {
-                    failure(error, failedDeletes);
-                }
-            }
-        }];
     }
+    return NO;
 }
+
 
 #pragma mark -
-
-- (CGFloat)progress
-{
-    [self willAccessValueForKey:@"progress"];
-    NSNumber *result = [self primitiveValueForKey:@"progress"];
-    [self didAccessValueForKey:@"progress"];
-    return [result floatValue];
-}
-
-- (void)setProgress:(CGFloat)progress
-{
-    [self willChangeValueForKey:@"progress"];
-    [self setPrimitiveValue:[NSNumber numberWithFloat:progress] forKey:@"progress"];
-    [self didChangeValueForKey:@"progress"];
-}
 
 - (MediaRemoteStatus)remoteStatus
 {
@@ -298,12 +129,19 @@ CGFloat const MediaDefaultJPEGCompressionQuality = 0.9;
     return [Media titleForRemoteStatus:self.remoteStatusNumber];
 }
 
+- (void)prepareForDeletion {
+    NSError *error = nil;
+    if (![[NSFileManager defaultManager] removeItemAtPath:self.absoluteLocalURL error:&error]) {
+        DDLogError(@"Error removing media files:%@", error);
+    }
+    if (![[NSFileManager defaultManager] removeItemAtPath:self.absoluteThumbnailLocalURL error:&error]) {
+        DDLogError(@"Error removing media files:%@", error);
+    }
+    [super prepareForDeletion];
+}
+
 - (void)remove
 {
-    [self cancelUpload];
-    NSError *error = nil;
-    [[NSFileManager defaultManager] removeItemAtPath:self.localURL error:&error];
-
     [self.managedObjectContext performBlockAndWait:^{
         [self.managedObjectContext deleteObject:self];
         [self.managedObjectContext save:nil];
@@ -320,138 +158,6 @@ CGFloat const MediaDefaultJPEGCompressionQuality = 0.9;
 - (BOOL)unattached
 {
     return self.posts.count == 0;
-}
-
-- (void)cancelUpload
-{
-    if ((self.remoteStatus == MediaRemoteStatusPushing || self.remoteStatus == MediaRemoteStatusProcessing) && self.progress < 1.0f) {
-        [_uploadOperation cancel];
-        _uploadOperation = nil;
-        self.remoteStatus = MediaRemoteStatusFailed;
-    }
-}
-
-- (void)uploadWithSuccess:(void (^)())success failure:(void (^)(NSError *error))failure
-{
-    [self save];
-    self.progress = 0.0f;
-
-    [self xmlrpcUploadWithSuccess:success failure:failure];
-}
-
-- (void)remoteUpdateWithSuccess:(void (^)())success failure:(void (^)(NSError *))failure
-{
-    [self save];
-    [self xmlrpcUpdateWithSuccess:success failure:failure];
-}
-
-- (void)xmlrpcUploadWithSuccess:(void (^)())success failure:(void (^)(NSError *error))failure
-{
-    NSString *mimeType = (self.mediaType == MediaTypeVideo) ? @"video/mp4" : @"image/jpeg";
-    NSDictionary *object = @{@"type": mimeType,
-                             @"name": self.filename,
-                             @"bits": [NSInputStream inputStreamWithFileAtPath:self.localURL]};
-    NSArray *parameters = [self.blog getXMLRPCArgsWithExtra:object];
-
-    self.remoteStatus = MediaRemoteStatusProcessing;
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^(void) {
-        // Create the request asynchronously
-        // TODO: use streaming to avoid processing on memory
-        NSMutableURLRequest *request = [self.blog.api requestWithMethod:@"metaWeblog.newMediaObject" parameters:parameters];
-
-        dispatch_async(dispatch_get_main_queue(), ^(void) {
-            void (^failureBlock)(AFHTTPRequestOperation *, NSError *) = ^(AFHTTPRequestOperation *operation, NSError *error) {
-                if ([self isDeleted] || self.managedObjectContext == nil) {
-                    return;
-                }
-
-                self.remoteStatus = MediaRemoteStatusFailed;
-                _uploadOperation = nil;
-                if (failure) {
-                    failure(error);
-                }
-            };
-            AFHTTPRequestOperation *operation = [self.blog.api HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
-                if ([self isDeleted] || self.managedObjectContext == nil) {
-                    return;
-                }
-
-                NSDictionary *response = (NSDictionary *)responseObject;
-
-                if (![response isKindOfClass:[NSDictionary class]]) {
-                    NSError *error = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadServerResponse userInfo:@{NSLocalizedDescriptionKey: NSLocalizedString(@"The server returned an empty response. This usually means you need to increase the memory limit for your site.", @"")}];
-                    failureBlock(operation, error);
-                    return;
-                }
-                if ([response objectForKey:@"videopress_shortcode"] != nil) {
-                    self.shortcode = [response objectForKey:@"videopress_shortcode"];
-                }
-
-                if ([response objectForKey:@"url"] != nil) {
-                    self.remoteURL = [response objectForKey:@"url"];
-                }
-
-                if ([response objectForKey:@"id"] != nil) {
-                    self.mediaID = [[response objectForKey:@"id"] numericValue];
-                }
-
-                self.remoteStatus = MediaRemoteStatusSync;
-                 _uploadOperation = nil;
-                if (success) {
-                    success();
-                }
-            } failure:failureBlock];
-            [operation setUploadProgressBlock:^(NSUInteger bytesWritten, long long totalBytesWritten, long long totalBytesExpectedToWrite) {
-                dispatch_async(dispatch_get_main_queue(), ^(void) {
-                    if ([self isDeleted] || self.managedObjectContext == nil) {
-                        return;
-                    }
-                    self.progress = (float)totalBytesWritten / (float)totalBytesExpectedToWrite;
-                });
-            }];
-            _uploadOperation = operation;
-
-            // Upload might have been canceled while processing
-            if (self.remoteStatus == MediaRemoteStatusProcessing) {
-                self.remoteStatus = MediaRemoteStatusPushing;
-                [self.blog.api enqueueHTTPRequestOperation:operation];
-            }
-        });
-    });
-}
-
-- (void)xmlrpcDeleteWithSuccess:(void (^)())success failure:(void (^)(NSError *))failure
-{
-    WPXMLRPCRequest *deleteRequest = [self.blog.api XMLRPCRequestWithMethod:@"wp.deletePost" parameters:[self.blog getXMLRPCArgsWithExtra:self.mediaID]];
-    WPXMLRPCRequestOperation *deleteOperation = [self.blog.api XMLRPCRequestOperationWithRequest:deleteRequest success:^(AFHTTPRequestOperation *operation, id responseObject) {
-        [self.managedObjectContext deleteObject:self];
-        if (success) {
-            success();
-        }
-        [self.managedObjectContext save:nil];
-    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-        if (failure) {
-            failure(error);
-        }
-    }];
-    [self.blog.api enqueueXMLRPCRequestOperation:deleteOperation];
-}
-
-- (void)xmlrpcUpdateWithSuccess:(void (^)())success failure:(void (^)(NSError *))failure
-{
-    NSArray *params = [self.blog getXMLRPCArgsWithExtra:@[self.mediaID, [self XMLRPCDictionaryForUpdate]]];
-    WPXMLRPCRequest *updateRequest = [self.blog.api XMLRPCRequestWithMethod:@"wp.editPost" parameters:params];
-    WPXMLRPCRequestOperation *update = [self.blog.api XMLRPCRequestOperationWithRequest:updateRequest success:^(AFHTTPRequestOperation *operation, id responseObject) {
-        if (success) {
-            success();
-        }
-    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-        if (failure) {
-            failure(error);
-        }
-    }];
-    [self.blog.api enqueueXMLRPCRequestOperation:update];
 }
 
 - (NSString *)html
@@ -528,6 +234,63 @@ CGFloat const MediaDefaultJPEGCompressionQuality = 0.9;
         }
     }
     return result;
+}
+
+- (NSString *)absoluteThumbnailLocalURL;
+{
+    if ( self.localThumbnailURL ) {
+        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+        NSString *documentsDirectory = [paths firstObject];
+        NSString *absolutePath = [NSString pathWithComponents:@[documentsDirectory, self.localThumbnailURL]];
+        return absolutePath;
+    } else {
+        return nil;
+    }
+}
+
+- (void)setAbsoluteThumbnailLocalURL:(NSString *)absoluteLocalURL
+{
+    NSParameterAssert([absoluteLocalURL isAbsolutePath]);
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *documentsDirectory = [paths firstObject];
+    NSString *localPath =  [absoluteLocalURL stringByReplacingOccurrencesOfString:documentsDirectory withString:@""];
+    self.localThumbnailURL = localPath;
+}
+
+- (NSString *)absoluteLocalURL
+{
+    if ( self.localURL ) {
+        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+        NSString *documentsDirectory = [paths firstObject];
+        NSString *absolutePath = [NSString pathWithComponents:@[documentsDirectory, self.localURL]];
+        return absolutePath;
+    } else {
+        return nil;
+    }
+}
+
+- (void)setAbsoluteLocalURL:(NSString *)absoluteLocalURL
+{
+    NSParameterAssert([absoluteLocalURL isAbsolutePath]);
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *documentsDirectory = [paths firstObject];
+    NSString *localPath =  [absoluteLocalURL stringByReplacingOccurrencesOfString:documentsDirectory withString:@""];
+    self.localURL = localPath;
+}
+
+- (NSString *)posterImageURL
+{
+    if (!self.videopressGUID) {
+        return self.remoteThumbnailURL;
+    }
+
+    NSString *posterURL = [self absoluteThumbnailLocalURL];
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if ([fileManager fileExistsAtPath:posterURL isDirectory:nil]) {
+        return posterURL;
+    }
+    posterURL = self.remoteThumbnailURL;
+    return posterURL;
 }
 
 @end

@@ -13,17 +13,17 @@
 #import "PostGeolocationViewController.h"
 #import "PostSettingsSelectionViewController.h"
 #import "PublishDatePickerView.h"
-#import "UITableViewTextFieldCell.h"
+#import "WPTextFieldTableViewCell.h"
 #import "WordPressAppDelegate.h"
-#import "WPAlertView.h"
-#import "MediaBrowserViewController.h"
-#import "WPTableViewController.h"
 #import "WPTableViewActivityCell.h"
-#import "WPTableViewSectionHeaderView.h"
+#import "WPTableViewSectionHeaderFooterView.h"
 #import "WPTableImageSource.h"
 #import "ContextManager.h"
 #import "MediaService.h"
 #import "WPProgressTableViewCell.h"
+#import "WPAndDeviceMediaLibraryDataSource.h"
+#import <WPMediaPicker/WPMediaPicker.h>
+#import "WPGUIConstants.h"
 #import <AssetsLibrary/AssetsLibrary.h>
 
 typedef enum {
@@ -47,13 +47,13 @@ static NSInteger RowIndexForDatePicker = 0;
 static NSString *const TableViewActivityCellIdentifier = @"TableViewActivityCellIdentifier";
 static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCellIdentifier";
 
-@interface PostSettingsViewController () <UITextFieldDelegate, WPTableImageSourceDelegate, WPPickerViewDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UIPopoverControllerDelegate> {
-}
+@interface PostSettingsViewController () <UITextFieldDelegate, WPTableImageSourceDelegate, WPPickerViewDelegate,
+UIImagePickerControllerDelegate, UINavigationControllerDelegate,
+UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategoriesViewControllerDelegate>
 
 @property (nonatomic, strong) AbstractPost *apost;
 @property (nonatomic, strong) UITextField *passwordTextField;
 @property (nonatomic, strong) UITextField *tagsTextField;
-@property (nonatomic, strong) NSArray *statusList;
 @property (nonatomic, strong) NSArray *visibilityList;
 @property (nonatomic, strong) NSArray *formatsList;
 @property (nonatomic, strong) WPTableImageSource *imageSource;
@@ -63,7 +63,8 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 @property (nonatomic, strong) UIPopoverController *popover;
 @property (nonatomic, assign) BOOL *shouldHideStatusBar;
 @property (nonatomic, assign) BOOL *isUploadingMedia;
-@property (nonatomic, strong) NSProgress * featuredImageProgress;
+@property (nonatomic, strong) NSProgress *featuredImageProgress;
+@property (nonatomic, strong) WPAndDeviceMediaLibraryDataSource *mediaDataSource;
 
 @end
 
@@ -71,7 +72,6 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 
 - (void)dealloc
 {
-
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self removePostPropertiesObserver];
 }
@@ -96,9 +96,6 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
 
-    NSMutableArray *allStatuses = [NSMutableArray arrayWithArray:[self.apost availableStatuses]];
-    [allStatuses removeObject:NSLocalizedString(@"Private", @"Privacy setting for posts set to 'Private'. Should be the same as in core WP.")];
-    self.statusList = [NSArray arrayWithArray:allStatuses];
     self.visibilityList = @[NSLocalizedString(@"Public", @"Privacy setting for posts set to 'Public' (default). Should be the same as in core WP."),
                            NSLocalizedString(@"Password protected", @"Privacy setting for posts set to 'Password protected'. Should be the same as in core WP."),
                            NSLocalizedString(@"Private", @"Privacy setting for posts set to 'Private'. Should be the same as in core WP.")];
@@ -128,12 +125,6 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 
     [self.navigationController setNavigationBarHidden:NO animated:NO];
     [self.navigationController setToolbarHidden:YES];
-    
-    // Do not hide the status bar on iPads
-    if (self.shouldHideStatusBar && !IS_IPAD) {
-        [[UIApplication sharedApplication] setStatusBarHidden:YES
-                                                withAnimation:nil];
-    }
     
     [self reloadData];
 }
@@ -247,16 +238,6 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 - (void)datePickerChanged:(NSDate *)date
 {
     self.apost.dateCreated = date;
-
-    // Try to match behavior in wp-admin.
-    // A nil value for date means "publish immediately", so also change status to publish.
-    // If a draft post is given a future date, change its status to publish.
-    // This approximates the behavior of wp-admin with only a single button to save vs a button
-    // to save as a draft, and a button to update/schedule/publish
-    if ((date == nil) ||
-        ([self.apost.dateCreated compare:[NSDate date]] == NSOrderedDescending && [self.apost.status isEqualToString:@"draft"])) {
-        self.apost.status = @"publish";
-    }
 }
 
 #pragma mark - TextField Delegate Methods
@@ -372,9 +353,8 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
-    WPTableViewSectionHeaderView *header = [[WPTableViewSectionHeaderView alloc] initWithFrame:CGRectMake(0.0f, 0.0f, CGRectGetWidth(self.view.bounds), 0.0f)];
+    WPTableViewSectionHeaderFooterView *header = [[WPTableViewSectionHeaderFooterView alloc] initWithReuseIdentifier:nil style:WPTableViewSectionStyleHeader];
     header.title = [self titleForHeaderInSection:section];
-    header.backgroundColor = self.tableView.backgroundColor;
     return header;
 }
 
@@ -385,7 +365,7 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
     }
 
     NSString *title = [self titleForHeaderInSection:section];
-    return [WPTableViewSectionHeaderView heightForTitle:title andWidth:CGRectGetWidth(self.view.bounds)];
+    return [WPTableViewSectionHeaderFooterView heightForHeader:title width:CGRectGetWidth(self.view.bounds)];
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
@@ -485,7 +465,7 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 
     } else if (indexPath.row == PostSettingsRowTags) {
         // Tags
-        UITableViewTextFieldCell *textCell = [self getTextFieldCell];
+        WPTextFieldTableViewCell *textCell = [self getTextFieldCell];
         textCell.textLabel.text = NSLocalizedString(@"Tags", @"Label for the tags field. Should be the same as WP core.");
         textCell.textField.text = self.post.tags;
         textCell.textField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:(NSLocalizedString(@"Comma separated", @"Placeholder text for the tags field. Should be the same as WP core.")) attributes:(@{NSForegroundColorAttributeName: [WPStyleGuide textFieldPlaceholderGrey]})];
@@ -508,7 +488,7 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
         // Publish date
         cell = [self getWPTableViewCell];
         if (self.apost.dateCreated) {
-            if ([self.apost.dateCreated compare:[NSDate date]] == NSOrderedDescending) {
+            if ([self.apost isScheduled]) {
                 cell.textLabel.text = NSLocalizedString(@"Scheduled for", @"Scheduled for [date]");
             } else {
                 cell.textLabel.text = NSLocalizedString(@"Published on", @"Published on [date]");
@@ -523,25 +503,17 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
             cell.detailTextLabel.text = NSLocalizedString(@"Immediately", @"");
         }
         cell.tag = PostSettingsRowPublishDate;
-
     } else if (indexPath.row == 0 && self.datePicker) {
         // Date picker
         cell = [self getWPTableViewDatePickerCell];
-        [cell.contentView addSubview:self.datePicker];
-
     } else if (indexPath.row == 1) {
         // Publish Status
         cell = [self getWPTableViewCell];
         cell.textLabel.text = NSLocalizedString(@"Status", @"The status of the post. Should be the same as in core WP.");
         cell.accessibilityIdentifier = @"Status";
-        if (([self.apost.dateCreated compare:[NSDate date]] == NSOrderedDescending)
-            && ([self.apost.status isEqualToString:@"publish"])) {
-            cell.detailTextLabel.text = NSLocalizedString(@"Scheduled", @"If a post is scheduled for later, this string is used for the post's status. Should use the same translation as core WP.");
-        } else {
-            cell.detailTextLabel.text = self.apost.statusTitle;
-        }
+        cell.detailTextLabel.text = self.apost.statusTitle;
 
-        if ([self.apost.status isEqualToString:@"private"]) {
+        if ([self.apost.status isEqualToString:PostStatusPrivate]) {
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else {
             cell.selectionStyle = UITableViewCellSelectionStyleBlue;
@@ -559,7 +531,7 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 
     } else {
         // Password
-        UITableViewTextFieldCell *textCell = [self getTextFieldCell];
+        WPTextFieldTableViewCell *textCell = [self getTextFieldCell];
         textCell.textLabel.text = NSLocalizedString(@"Password", @"Label for the tags field. Should be the same as WP core.");
         textCell.textField.text = self.apost.password;
         textCell.textField.attributedPlaceholder = nil;
@@ -699,10 +671,14 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
     if (!cell) {
         cell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:wpTableViewCellIdentifier];
         cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
         [WPStyleGuide configureTableViewCell:cell];
+        CGRect frame = self.datePicker.frame;
+        frame.size.width = cell.contentView.frame.size.width;
+        self.datePicker.frame = frame;
+        [cell.contentView addSubview:self.datePicker];
     }
-    [[cell.contentView subviews] makeObjectsPerformSelector:@selector(removeFromSuperview)];
-    cell.tag = 0;
+    cell.tag = PostSettingsRowPublishDate;
     return cell;
 }
 
@@ -717,12 +693,12 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
     return cell;
 }
 
-- (UITableViewTextFieldCell *)getTextFieldCell
+- (WPTextFieldTableViewCell *)getTextFieldCell
 {
     static NSString *textFieldCellIdentifier = @"textFieldCellIdentifier";
-    UITableViewTextFieldCell *cell = [self.tableView dequeueReusableCellWithIdentifier:textFieldCellIdentifier];
+    WPTextFieldTableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:textFieldCellIdentifier];
     if (!cell) {
-        cell = [[UITableViewTextFieldCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:textFieldCellIdentifier];
+        cell = [[WPTextFieldTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:textFieldCellIdentifier];
         cell.textField.returnKeyType = UIReturnKeyDone;
         cell.textField.delegate = self;
         [WPStyleGuide configureTableViewTextCell:cell];
@@ -771,24 +747,26 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 
 - (void)showPostStatusSelector
 {
-    if ([self.apost.status isEqualToString:@"private"]) {
+    if ([self.apost.status isEqualToString:PostStatusPrivate]) {
         return;
     }
 
-    NSMutableArray *titles = [NSMutableArray arrayWithArray:[self.apost availableStatuses]];
-    [titles removeObject:NSLocalizedString(@"Private", @"Privacy setting for posts set to 'Private'. Should be the same as in core WP.")];
+    NSArray *statuses = [self.apost availableStatusesForEditing];
+    NSArray *titles = [statuses wp_map:^id(NSString *status) {
+        return [BasePost titleForStatus:status];
+    }];
 
     NSDictionary *statusDict = @{
-                                 @"DefaultValue": NSLocalizedString(@"Published", @""),
+                                 @"DefaultValue": PostStatusPublish,
                                  @"Title" : NSLocalizedString(@"Status", nil),
                                  @"Titles" : titles,
-                                 @"Values" : titles,
-                                 @"CurrentValue" : self.apost.statusTitle
+                                 @"Values" : statuses,
+                                 @"CurrentValue" : self.apost.status
                                  };
     PostSettingsSelectionViewController *vc = [[PostSettingsSelectionViewController alloc] initWithDictionary:statusDict];
     __weak PostSettingsSelectionViewController *weakVc = vc;
     vc.onItemSelected = ^(NSString *status) {
-        [self.apost setStatusTitle:status];
+        self.apost.status = status;
         [weakVc dismiss];
         [self.tableView reloadData];
     };
@@ -818,12 +796,12 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
         NSAssert(_apost.managedObjectContext != nil, @"The post's MOC should not be nil here.");
 
         if ([visibility isEqualToString:NSLocalizedString(@"Private", @"Post privacy status in the Post Editor/Settings area (compare with WP core translations).")]) {
-            self.apost.status = @"private";
+            self.apost.status = PostStatusPrivate;
             self.apost.password = nil;
         } else {
-            if ([self.apost.status isEqualToString:@"private"]) {
-                if ([self.apost.original.status isEqualToString:@"private"]) {
-                    self.apost.status = @"publish";
+            if ([self.apost.status isEqualToString:PostStatusPrivate]) {
+                if ([self.apost.original.status isEqualToString:PostStatusPrivate]) {
+                    self.apost.status = PostStatusPublish;
                 } else {
                     // restore the original status
                     self.apost.status = self.apost.original.status;
@@ -902,43 +880,39 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
         }
     } else {
         if (!self.isUploadingMedia) {
-            [self showPhotoPicker];
+            [self showMediaPicker];
         }
     }
 }
 
-- (void)showPhotoPicker
+- (void)showMediaPicker
 {
-    UIImagePickerController *picker = [[UIImagePickerController alloc] init];
-    picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+    WPMediaPickerViewController *picker = [[WPMediaPickerViewController alloc] init];
+    self.mediaDataSource = [[WPAndDeviceMediaLibraryDataSource alloc] initWithPost:self.apost];
+    picker.dataSource = self.mediaDataSource;
+    picker.filter = WPMediaTypeImage;
     picker.delegate = self;
-    picker.allowsEditing = NO;
-    picker.navigationBar.translucent = NO;
-    picker.modalPresentationStyle = UIModalPresentationCurrentContext;
-    picker.navigationBar.barStyle = UIBarStyleBlack;
-
+    picker.allowMultipleSelection = NO;
+    picker.showMostRecentFirst = YES;
     if (IS_IPAD) {
         self.popover = [[UIPopoverController alloc] initWithContentViewController:picker];
         CGRect frame = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:PostSettingsSectionFeaturedImage]];
         self.popover.delegate = self;
         [self.popover presentPopoverFromRect:frame inView:self.view permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
     } else {
-        [self.navigationController presentViewController:picker animated:YES completion:nil];
+        [self presentViewController:picker animated:YES completion:nil];
     }
 }
 
 - (void)showCategoriesSelection
 {
-    PostCategoriesViewController *controller = [[PostCategoriesViewController alloc] initWithPost:[self post] selectionMode:CategoriesSelectionModePost];
+    PostCategoriesViewController *controller = [[PostCategoriesViewController alloc] initWithBlog:self.post.blog
+                                                                                 currentSelection:[self.post.categories allObjects]
+                                                                                    selectionMode:CategoriesSelectionModePost];
+    controller.delegate = self;
     [self.navigationController pushViewController:controller animated:YES];
 }
 
-- (void)showMediaLibrary
-{
-    self.navigationItem.title = NSLocalizedString(@"Back", nil);
-    MediaBrowserViewController *vc = [[MediaBrowserViewController alloc] initWithPost:self.post];
-    [self.navigationController pushViewController:vc animated:YES];
-}
 
 - (void)loadFeaturedImage:(NSIndexPath *)indexPath
 {
@@ -960,7 +934,7 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
                                  indexPath:indexPath
                                  isPrivate:self.apost.blog.isPrivate];
     };
-    if (media){
+    if (media){        
         successBlock(media);
         return;
     }
@@ -995,7 +969,7 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
     return _imageSource;
 }
 
-- (void) uploadFeatureImage:(ALAsset *)asset
+- (void)uploadFeatureImage:(ALAsset *)asset
 {
     NSProgress * convertingProgress = [NSProgress progressWithTotalUnitCount:1];
     [convertingProgress setUserInfoObject:[UIImage imageWithCGImage:asset.thumbnail] forKey:WPProgressImageThumbnailKey];
@@ -1015,31 +989,39 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
             strongSelf.isUploadingMedia = NO;
             return;
         }
-        media.mediaType = MediaTypeFeatured;
-        NSProgress * progress = nil;
-        [mediaService uploadMedia:media
-                         progress:&progress
-                          success:^{
-                              strongSelf.isUploadingMedia = NO;
-                              Post *post = (Post *)weakSelf.apost;
-                              post.featuredImage = media;
-                              [strongSelf.tableView reloadData];
-                          } failure:^(NSError *error) {
-                              strongSelf.isUploadingMedia = NO;
-                              [strongSelf.tableView reloadData];
-                              if (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled) {
-                                  return;
-                              }
-                              [WPError showAlertWithTitle:NSLocalizedString(@"Couldn't upload featured image", @"The title for an alert that says to the user that the featured image he selected couldn't be uploaded.") message:error.localizedDescription];
-                              DDLogError(@"Couldn't upload featured image: %@", [error localizedDescription]);
-                          }];
-        [progress setUserInfoObject:[UIImage imageWithData:media.thumbnail] forKey:WPProgressImageThumbnailKey];
-        progress.localizedDescription = NSLocalizedString(@"Uploading...",@"Label to show while uploading media to server");
-        progress.kind = NSProgressKindFile;
-        [progress setUserInfoObject:NSProgressFileOperationKindCopying forKey:NSProgressFileOperationKindKey];
-        strongSelf.featuredImageProgress = progress;
-        [strongSelf.tableView reloadData];
+        [self uploadFeaturedMedia:media];
     }];
+}
+
+- (void)uploadFeaturedMedia:(Media *)media
+{
+    MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
+    NSProgress * progress = nil;
+    __weak __typeof__(self) weakSelf = self;
+    [mediaService uploadMedia:media
+                     progress:&progress
+                      success:^{
+                          __typeof__(self) strongSelf = weakSelf;
+                          strongSelf.isUploadingMedia = NO;
+                          Post *post = (Post *)strongSelf.apost;
+                          post.featuredImage = media;
+                          [strongSelf.tableView reloadData];
+                      } failure:^(NSError *error) {
+                          __typeof__(self) strongSelf = weakSelf;
+                          strongSelf.isUploadingMedia = NO;
+                          [strongSelf.tableView reloadData];
+                          if (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled) {
+                              return;
+                          }
+                          [WPError showAlertWithTitle:NSLocalizedString(@"Couldn't upload featured image", @"The title for an alert that says to the user that the featured image he selected couldn't be uploaded.") message:error.localizedDescription];
+                          DDLogError(@"Couldn't upload featured image: %@", [error localizedDescription]);
+                      }];
+    [progress setUserInfoObject:[UIImage imageWithData:[NSData dataWithContentsOfFile:media.absoluteThumbnailLocalURL]] forKey:WPProgressImageThumbnailKey];
+    progress.localizedDescription = NSLocalizedString(@"Uploading...",@"Label to show while uploading media to server");
+    progress.kind = NSProgressKindFile;
+    [progress setUserInfoObject:NSProgressFileOperationKindCopying forKey:NSProgressFileOperationKindKey];
+    self.featuredImageProgress = progress;
+    [self.tableView reloadData];
 }
 
 #pragma mark - WPTableImageSourceDelegate
@@ -1063,7 +1045,7 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
 {
     if (self.apost.password) {
         return NSLocalizedString(@"Password protected", @"Privacy setting for posts set to 'Password protected'. Should be the same as in core WP.");
-    } else if ([self.apost.status isEqualToString:@"private"]) {
+    } else if ([self.apost.status isEqualToString:PostStatusPrivate]) {
         return NSLocalizedString(@"Private", @"Privacy setting for posts set to 'Private'. Should be the same as in core WP.");
     }
 
@@ -1108,34 +1090,52 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
     }
 }
 
-#pragma mark - UIImagePickerControllerDelegate methods
+#pragma mark - WPMediaPickerViewControllerDelegate methods
 
-- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
+- (void)mediaPickerController:(WPMediaPickerViewController *)picker didFinishPickingAssets:(NSArray *)assets
 {
-    __weak __typeof(self) weakSelf = self;
-    self.isUploadingMedia = YES;
-    // On iOS7 the image picker seems to override our preferred setting so we force the status bar color back.
-    [[UIApplication sharedApplication] setStatusBarStyle:UIStatusBarStyleLightContent];
-    NSURL *assetURL = [info objectForKey:UIImagePickerControllerReferenceURL];
-    ALAssetsLibrary *assetsLibrary = [[ALAssetsLibrary alloc] init];
-    [assetsLibrary assetForURL:assetURL resultBlock:^(ALAsset *asset){
+    if (assets.count == 0 ){
+        return;
+    }
+    
+    if ([[assets firstObject] isKindOfClass:[ALAsset class]]){
+        ALAsset *asset = [assets firstObject];
         if (!asset.defaultRepresentation) {
             [WPError showAlertWithTitle:NSLocalizedString(@"Image unavailable", @"The title for an alert that says the image the user selected isn't available.")
                                 message:NSLocalizedString(@"This Photo Stream image cannot be added to your WordPress. Try saving it to your Camera Roll before uploading.", @"User information explaining that the image is not available locally. This is normally related to share photo stream images.")  withSupportButton:NO];
             return;
         }
-        [weakSelf uploadFeatureImage:asset];
-        if (IS_IPAD) {
-            [weakSelf.popover dismissPopoverAnimated:YES];
+        
+        self.isUploadingMedia = YES;
+        [self uploadFeatureImage:assets[0]];
+    } else if ([[assets firstObject] isKindOfClass:[Media class]]){
+        Media *media = [assets firstObject];
+        if ([media.mediaID intValue] != 0) {
+            Post *post = (Post *)self.apost;
+            post.featuredImage = media;
         } else {
-            [weakSelf.navigationController dismissViewControllerAnimated:YES completion:nil];
+            self.isUploadingMedia = YES;
+            [self uploadFeaturedMedia:media];
         }
-        // Reload the featured image row so that way the activity indicator will be displayed.        
-        [weakSelf.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:0 inSection:[self.sections indexOfObject:@(PostSettingsSectionFeaturedImage)]]] withRowAnimation:UITableViewRowAnimationFade];
-    } failureBlock:^(NSError *error){
-        DDLogError(@"can't get asset %@: %@", assetURL, [error localizedDescription]);
-        weakSelf.isUploadingMedia = NO;
-    }];
+    }
+    
+    if (IS_IPAD) {
+        [self.popover dismissPopoverAnimated:YES];
+    } else {
+        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+    }
+    // Reload the featured image row so that way the activity indicator will be displayed.
+    NSIndexPath *featureImageCellPath = [NSIndexPath indexPathForRow:0 inSection:[self.sections indexOfObject:@(PostSettingsSectionFeaturedImage)]];
+    [self.tableView reloadRowsAtIndexPaths:@[featureImageCellPath]
+                          withRowAnimation:UITableViewRowAnimationFade];
+}
+
+- (void)mediaPickerControllerDidCancel:(WPMediaPickerViewController *)picker {
+    if (IS_IPAD) {
+        [self.popover dismissPopoverAnimated:YES];
+    } else {
+        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+    }
 }
 
 #pragma mark - UIPopoverControllerDelegate methods
@@ -1149,6 +1149,23 @@ static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCell
     // Reset delegate and nil popover property
     self.popover.delegate = nil;
     self.popover = nil;
+}
+
+#pragma mark - Status bar management
+
+- (BOOL)prefersStatusBarHidden
+{
+    // Do not hide the status bar on iPad
+    return self.shouldHideStatusBar && !IS_IPAD;
+}
+
+#pragma mark - PostCategoriesViewControllerDelegate
+
+- (void)postCategoriesViewController:(PostCategoriesViewController *)controller didUpdateSelectedCategories:(NSSet *)categories
+{
+    // Save changes.
+    self.post.categories = [categories mutableCopy];
+    [self.post save];
 }
 
 @end

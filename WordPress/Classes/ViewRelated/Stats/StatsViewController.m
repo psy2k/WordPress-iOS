@@ -1,5 +1,5 @@
 #import "StatsViewController.h"
-#import "Blog+Jetpack.h"
+#import "Blog.h"
 #import "WordPressAppDelegate.h"
 #import "JetpackSettingsViewController.h"
 #import "StatsWebViewController.h"
@@ -18,6 +18,7 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
 @interface StatsViewController () <UIActionSheetDelegate, WPStatsViewControllerDelegate>
 
 @property (nonatomic, assign) BOOL showingJetpackLogin;
+@property (nonatomic, strong) UINavigationController *statsNavVC;
 @property (nonatomic, strong) WPStatsViewController *statsVC;
 @property (nonatomic, weak) WPNoResultsView *noResultsView;
 
@@ -25,10 +26,12 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
 
 @implementation StatsViewController
 
-- (id)init
+- (instancetype)init
 {
     self = [super init];
     if (self) {
+        self.restorationClass = [self class];
+        self.restorationIdentifier = NSStringFromClass([self class]);
     }
     return self;
 }
@@ -39,7 +42,10 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
  
     self.view.backgroundColor = [WPStyleGuide itsEverywhereGrey];
     
-    self.statsVC = [[UIStoryboard storyboardWithName:@"SiteStats" bundle:nil] instantiateInitialViewController];
+    NSString *path = [[NSBundle mainBundle] pathForResource:@"WordPressCom-Stats-iOS" ofType:@"bundle"];
+    NSBundle *bundle = [NSBundle bundleWithPath:path];
+    self.statsNavVC = [[UIStoryboard storyboardWithName:@"SiteStats" bundle:bundle] instantiateInitialViewController];
+    self.statsVC = self.statsNavVC.viewControllers.firstObject;
     self.statsVC.statsDelegate = self;
     
     self.navigationItem.title = NSLocalizedString(@"Stats", @"Stats window title");
@@ -75,7 +81,7 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
 
 - (void)initStats
 {
-    WordPressAppDelegate *appDelegate = [WordPressAppDelegate sharedWordPressApplicationDelegate];
+    WordPressAppDelegate *appDelegate = [WordPressAppDelegate sharedInstance];
     if (!appDelegate.connectionAvailable) {
         [self showNoResultsWithTitle:NSLocalizedString(@"No Connection", @"") message:NSLocalizedString(@"An active internet connection is required to view stats", @"")];
         return;
@@ -86,18 +92,19 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
     
     self.statsVC.siteTimeZone = [blogService timeZoneForBlog:self.blog];
 
-    if (self.blog.isWPcom) {
+    // WordPress.com + Jetpack REST
+    if (self.blog.account) {
         self.statsVC.oauth2Token = self.blog.restApi.authToken;
-        self.statsVC.siteID = self.blog.blogID;
+        self.statsVC.siteID = self.blog.dotComID;
         [self addStatsViewControllerToView];
 
         return;
     }
 
-    // Jetpack
+    // Jetpack Legacy (WPJetpackRESTEnabled == NO)
     BOOL needsJetpackLogin = ![self.blog.jetpackAccount.restApi hasCredentials];
-    if (!needsJetpackLogin && self.blog.jetpackBlogID && self.blog.jetpackAccount) {
-        self.statsVC.siteID = self.blog.jetpackBlogID;
+    if (!needsJetpackLogin && self.blog.jetpack.siteID && self.blog.jetpackAccount) {
+        self.statsVC.siteID = self.blog.jetpack.siteID;
         self.statsVC.oauth2Token = self.blog.jetpackAccount.restApi.authToken;
         [self addStatsViewControllerToView];
 

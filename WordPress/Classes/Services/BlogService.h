@@ -1,11 +1,10 @@
 #import <Foundation/Foundation.h>
 #import "LocalCoreDataService.h"
+#import "Blog.h"
 
-@class Blog;
 @class WPAccount;
 
-@interface BlogService : NSObject <LocalCoreDataService>
-
+@interface BlogService : LocalCoreDataService
 
 /**
  Returns the blog that matches with a given blogID
@@ -18,17 +17,17 @@
 - (void)flagBlogAsLastUsed:(Blog *)blog;
 
 /**
- Returns the blog currently flagged as the one last used, or the first blog in
- an alphanumerically sorted list, if no blog is currently flagged as last used.
+ Returns the blog currently flagged as the one last used, or the primary blog,
+ or the first blog in an alphanumerically sorted list, whichever is found first.
  */
 - (Blog *)lastUsedOrFirstBlog;
 
 /**
- Returns the wpcom blog currently flagged as the one last used, or the first wpcom
- blog in an alphanumerically sorted list, if no wpcom blog is currently flagged as 
- last used.
+ Returns the blog currently flagged as the one last used, or the primary blog,
+ or the first blog in an alphanumerically sorted list that supports the given
+ feature, whichever is found first.
  */
-- (Blog *)lastUsedOrFirstWPcomBlog;
+- (Blog *)lastUsedOrFirstBlogThatSupports:(BlogFeature)feature;
 
 /**
  Returns the blog currently flaged as the one last used.
@@ -41,25 +40,63 @@
 - (Blog *)firstBlog;
 
 /**
- Returns the first WPCom blog in an alphanumerically sorted list.
+ Returns the default WPCom blog.
  */
-- (Blog *)firstWPComBlog;
+- (Blog *)primaryBlog;
 
+- (void)syncBlogsForAccount:(WPAccount *)account
+                    success:(void (^)())success
+                    failure:(void (^)(NSError *error))failure;
 
-- (void)syncBlogsForAccount:(WPAccount *)account success:(void (^)())success failure:(void (^)(NSError *error))failure;
+- (void)syncOptionsForBlog:(Blog *)blog
+                   success:(void (^)())success
+                   failure:(void (^)(NSError *error))failure;
 
-- (void)syncOptionsForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
-- (void)syncPostFormatsForBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
+- (void)syncPostFormatsForBlog:(Blog *)blog
+                       success:(void (^)())success
+                       failure:(void (^)(NSError *error))failure;
 
-/*! Syncs an entire blog include posts, pages, comments, options, post formats and categories.
- *  Used for instances where the entire blog should be refreshed or initially downloaded.
+/**
+ *  Sync blog settings from the server
  *
- *  \param success Completion block called if the operation was a success
- *  \param failure Completion block called if the operation was a failure
+ *  @param blog    the blog from where to read the information from
+ *  @param success a block that is invoked when the sync is sucessfull
+ *  @param failure a block that in invoked when the sync fails.
  */
-- (void)syncBlog:(Blog *)blog success:(void (^)())success failure:(void (^)(NSError *error))failure;
+- (void)syncSettingsForBlog:(Blog *)blog
+                   success:(void (^)())success
+                   failure:(void (^)(NSError *error))failure;
 
-- (void)checkVideoPressEnabledForBlog:(Blog *)blog success:(void (^)(BOOL enabled))success failure:(void (^)(NSError *error))failure;
+/**
+ *  Update blog settings to server
+ *
+ *  @param blog    the blog to update
+ *  @param success a block that is invoked when the update is sucessfull
+ *  @param failure a block that in invoked when the update fails.
+ */
+- (void)updateSettingForBlog:(Blog *)blog
+                     success:(void (^)())success
+                     failure:(void (^)(NSError *error))failure;
+
+
+/**
+ *  Update the password for the blog.
+ *
+ *  @discussion This is only valid for self-hosted sites that don't use jetpack.
+ *
+ *  @param password the new password to use for the blog
+ *  @param blog to change the password.
+ */
+- (void)updatePassword:(NSString *)password forBlog:(Blog *)blog;
+
+- (void)migrateJetpackBlogsToXMLRPCWithCompletion:(void (^)())success;
+
+/**
+ Syncs an blog "meta data" including post formats, blog options, and categories. 
+ Also checks if the blog is multi-author.
+ Used for instances where the entire blog should be refreshed or initially downloaded.
+ */
+- (void)syncBlog:(Blog *)blog;
 
 - (BOOL)hasVisibleWPComAccounts;
 
@@ -73,12 +110,19 @@
 
 - (NSArray *)blogsForAllAccounts;
 
+/**
+ Returns every stored blog, arranged in a Dictionary by blogId.
+ */
+- (NSDictionary *)blogsForAllAccountsById;
+
 /*! Determine timezone for blog from blog options.  If no timezone information is stored on
  *  the device, then assume GMT+0 is the default.
  *  
  *  \param blog     The blog/site to determine the timezone for.
  */
 - (NSTimeZone *)timeZoneForBlog:(Blog *)blog;
+
+- (void)removeBlog:(Blog *)blog;
 
 ///--------------------
 /// @name Blog creation
@@ -87,11 +131,25 @@
 /**
  Searches for a `Blog` object for this account with the given XML-RPC endpoint
 
+ @warn If more than one blog is found, they'll be considered duplicates and be
+ deleted leaving only one of them.
+
  @param xmlrpc the XML-RPC endpoint URL as a string
  @param account the account the blog belongs to
  @return the blog if one was found, otherwise it returns nil
  */
-- (Blog *)findBlogWithXmlrpc:(NSString *)xmlrpc inAccount:(WPAccount *)account;
+- (Blog *)findBlogWithXmlrpc:(NSString *)xmlrpc
+                   inAccount:(WPAccount *)account;
+
+/**
+ Searches for a `Blog` object for this account with the given username
+
+ @param xmlrpc the XML-RPC endpoint URL as a string
+ @param username the blog's username
+ @return the blog if one was found, otherwise it returns nil
+ */
+- (Blog *)findBlogWithXmlrpc:(NSString *)xmlrpc
+                 andUsername:(NSString *)username;
 
 /**
  Creates a blank `Blog` object for this account

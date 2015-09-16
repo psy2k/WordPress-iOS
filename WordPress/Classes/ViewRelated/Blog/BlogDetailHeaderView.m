@@ -39,7 +39,7 @@ const CGFloat BlogDetailHeaderViewLabelHorizontalPadding = 10.0;
 
 - (void)setBlog:(Blog *)blog
 {
-    [self.blavatarImageView setImageWithBlavatarUrl:blog.blavatarUrl isWPcom:blog.isWPcom];
+    [self.blavatarImageView setImageWithSiteIcon:blog.icon];
 
     // if the blog name is missing, we want to show the blog displayURL instead
     [self.titleLabel setText:((blog.blogName && !blog.blogName.isEmpty) ? blog.blogName : blog.displayURL)];
@@ -107,6 +107,7 @@ const CGFloat BlogDetailHeaderViewLabelHorizontalPadding = 10.0;
 {
     CGRect blavatarFrame = CGRectMake(0.0f, 0.0f, BlogDetailHeaderViewBlavatarSize, BlogDetailHeaderViewBlavatarSize);
     UIImageView *imageView = [[UIImageView alloc] initWithFrame:blavatarFrame];
+    imageView.backgroundColor = [UIColor whiteColor];
     imageView.translatesAutoresizingMaskIntoConstraints = NO;
     imageView.layer.borderColor = [[UIColor whiteColor] CGColor];
     imageView.layer.borderWidth = 1.0;

@@ -1,13 +1,16 @@
 #import <Foundation/Foundation.h>
 #import <CoreData/CoreData.h>
 #import "BasePost.h"
+#import "ReaderPostContentProvider.h"
 
-@class ReaderTopic;
+@class ReaderAbstractTopic;
+@class SourcePostAttribution;
+@class Comment;
 
 extern NSString * const ReaderPostStoredCommentIDKey;
 extern NSString * const ReaderPostStoredCommentTextKey;
 
-@interface ReaderPost : BasePost
+@interface ReaderPost : BasePost <ReaderPostContentProvider>
 
 @property (nonatomic, strong) NSString *authorDisplayName;
 @property (nonatomic, strong) NSString *authorEmail;
@@ -17,7 +20,6 @@ extern NSString * const ReaderPostStoredCommentTextKey;
 @property (nonatomic, strong) NSString *blogURL;
 @property (nonatomic, strong) NSNumber *commentCount;
 @property (nonatomic) BOOL commentsOpen;
-@property (nonatomic, strong) NSDate *dateCommentsSynced;
 @property (nonatomic, strong) NSString *featuredImage;
 @property (nonatomic, strong) NSString *globalID;
 @property (nonatomic) BOOL isBlogPrivate;
@@ -28,23 +30,41 @@ extern NSString * const ReaderPostStoredCommentTextKey;
 @property (nonatomic, strong) NSNumber *likeCount;
 @property (nonatomic, strong) NSNumber *siteID;
 @property (nonatomic, strong) NSDate *sortDate;
-@property (nonatomic, strong) NSString *storedComment; // Formatted as commentID,string
 @property (nonatomic, strong) NSString *summary;
-@property (nonatomic, strong) NSMutableSet *comments;
+@property (nonatomic, strong) NSSet *comments;
 @property (nonatomic, readonly, strong) NSURL *featuredImageURL;
 @property (nonatomic, strong) NSString *tags;
-@property (nonatomic, strong) ReaderTopic *topic;
+@property (nonatomic, strong) ReaderAbstractTopic *topic;
 @property (nonatomic) BOOL isLikesEnabled;
 @property (nonatomic) BOOL isSharingEnabled;
 @property (nonatomic) BOOL isSiteBlocked;
+@property (nonatomic, strong) SourcePostAttribution *sourceAttribution;
+
+@property (nonatomic, strong) NSString *primaryTag;
+@property (nonatomic, strong) NSString *primaryTagSlug;
+@property (nonatomic, strong) NSString *secondaryTag;
+@property (nonatomic, strong) NSString *secondaryTagSlug;
+@property (nonatomic) BOOL isExternal;
+@property (nonatomic) BOOL isJetpack;
+@property (nonatomic) NSNumber *wordCount;
+@property (nonatomic) NSNumber *readingTime;
 
 - (BOOL)isPrivate;
-- (void)storeComment:(NSNumber *)commentID comment:(NSString *)comment;
-- (NSDictionary *)getStoredComment;
 - (NSString *)authorString;
 - (NSString *)avatar;
 - (UIImage *)cachedAvatarWithSize:(CGSize)size;
 - (void)fetchAvatarWithSize:(CGSize)size success:(void (^)(UIImage *image))success;
 - (BOOL)contentIncludesFeaturedImage;
+- (BOOL)isSourceAttributionWPCom;
 
 @end
+
+@interface ReaderPost (CoreDataGeneratedAccessors)
+
+- (void)addCommentsObject:(Comment *)value;
+- (void)removeCommentsObject:(Comment *)value;
+- (void)addComments:(NSSet *)values;
+- (void)removeComments:(NSSet *)values;
+
+@end
+

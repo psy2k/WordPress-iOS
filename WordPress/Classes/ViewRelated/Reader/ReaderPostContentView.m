@@ -8,12 +8,13 @@
 @property (nonatomic, strong) ReaderPost *post;
 @property (nonatomic, strong) UIButton *commentButton;
 @property (nonatomic, strong) UIButton *likeButton;
-@property (nonatomic, strong) UIButton *reblogButton;
-@property (nonatomic) BOOL shouldShowActionButtons;
+@property (nonatomic, weak) UITapGestureRecognizer *discoverTapRecognizer;
 
 @end
 
 @implementation ReaderPostContentView
+
+@dynamic delegate;
 
 #pragma mark - LifeCycle Methods
 
@@ -31,7 +32,6 @@
 - (void)configurePost:(ReaderPost *)post
 {
     self.post = post;
-    self.shouldShowActionButtons = (post.isWPCom && self.canShowActionButtons);
     self.contentProvider = post;
 }
 
@@ -64,17 +64,17 @@
 
 #pragma mark - Private Methods
 
+- (BOOL)shouldShowActionButtons
+{
+    // Do not show action buttons for source attributed posts.
+    return self.post.isWPCom && !self.post.sourceAttribution;
+}
+
 - (void)buildActionButtons
 {
-    self.canShowActionButtons = YES;
     self.shouldShowAttributionButton = YES;
 
     // Action buttons
-    self.reblogButton = [super createActionButtonWithImage:[UIImage imageNamed:@"reader-postaction-reblog-blue"] selectedImage:[UIImage imageNamed:@"reader-postaction-reblog-done"]];
-    [self.reblogButton addTarget:self action:@selector(reblogAction:) forControlEvents:UIControlEventTouchUpInside];
-    self.reblogButton.accessibilityLabel = NSLocalizedString(@"Reblog", @"Accessibility  Label for the Reblog Button in the Reader. Tapping shows a screen that allows the user to reblog a post.");
-    self.reblogButton.accessibilityIdentifier = @"Reblog";
-
     self.commentButton = [super createActionButtonWithImage:[UIImage imageNamed:@"reader-postaction-comment-blue"] selectedImage:[UIImage imageNamed:@"reader-postaction-comment-active"]];
     [self.commentButton addTarget:self action:@selector(commentAction:) forControlEvents:UIControlEventTouchUpInside];
     self.commentButton.accessibilityLabel = NSLocalizedString(@"Comment", @"Accessibility  Label for the Comment Button in the Reader. Tapping shows a screen that allows the user to comment a post.");
@@ -86,12 +86,12 @@
     self.likeButton.accessibilityIdentifier = @"Like";
 
     // Optimistically set action buttons and prime constraints for scrolling performance.
-    self.actionButtons = @[self.likeButton, self.commentButton, self.reblogButton];
+    self.actionButtons = @[self.likeButton, self.commentButton];
 }
 
 - (void)configureActionButtons
 {
-    if (!self.shouldShowActionButtons) {
+    if (![self shouldShowActionButtons]) {
         self.actionButtons = @[];
         return;
     }
@@ -102,13 +102,8 @@
         [actionButtons addObject:self.likeButton];
     }
 
-    if (self.post.commentsOpen && !self.shouldHideComments) {
+    if (!self.shouldHideComments && (self.post.commentsOpen || [self.post.commentCount integerValue] > 0)) {
         [actionButtons addObject:self.commentButton];
-    }
-
-    // Reblogging just for non private blogs
-    if (![self privateContent]) {
-        [actionButtons addObject:self.reblogButton];
     }
 
     self.actionButtons = actionButtons;
@@ -118,7 +113,7 @@
 
 - (void)updateActionButtons
 {
-    if (!self.shouldShowActionButtons) {
+    if (![self shouldShowActionButtons]) {
         return;
     }
 
@@ -147,12 +142,9 @@
 
     // Show highlights
     [self.likeButton setSelected:self.post.isLiked];
-    [self.reblogButton setSelected:self.post.isReblogged];
-    [self.reblogButton setNeedsLayout];
-    [self.reblogButton setHidden:self.shouldHideReblogButton];
 
-    // You can only reblog once.
-    self.reblogButton.userInteractionEnabled = !self.post.isReblogged;
+    // Enable/Disable like button. Set userInteractionEnabled to avoid the default disabled tint. 
+    self.likeButton.userInteractionEnabled = self.shouldEnableLoggedinFeatures;
 }
 
 - (void)configureAttributionView
@@ -177,15 +169,23 @@
     [self addSubview:self.attributionView];
 }
 
+- (void)buildDiscoverAttributionView
+{
+    [super buildDiscoverAttributionView];
+
+    UITapGestureRecognizer *tgr = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(didTapDiscoverAttribution:)];
+    [self.discoverPostAttributionView addGestureRecognizer:tgr];
+    self.discoverTapRecognizer = tgr;
+}
+
+- (void)configureDiscoverAttributionView
+{
+    [super configureDiscoverAttributionView];
+    self.discoverTapRecognizer.enabled = ([self.contentProvider sourceAttributionStyle] == SourceAttributionStyleSite);
+}
+
 
 #pragma mark - Action Methods
-
-- (void)reblogAction:(id)sender
-{
-    if ([self.delegate respondsToSelector:@selector(postView:didReceiveReblogAction:)]) {
-        [self.delegate postView:self didReceiveReblogAction:sender];
-    }
-}
 
 - (void)commentAction:(id)sender
 {
@@ -198,6 +198,13 @@
 {
     if ([self.delegate respondsToSelector:@selector(postView:didReceiveLikeAction:)]) {
         [self.delegate postView:self didReceiveLikeAction:sender];
+    }
+}
+
+- (void)didTapDiscoverAttribution:(UITapGestureRecognizer *)gestureRecognizer
+{
+    if ([self.delegate respondsToSelector:@selector(postView:didTapDiscoverAttribution:)]) {
+        [self.delegate postView:self didTapDiscoverAttribution:self.discoverPostAttributionView];
     }
 }
 

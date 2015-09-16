@@ -2,17 +2,38 @@
 #import "Media.h"
 #import "PostCategory.h"
 #import "Coordinate.h"
+#import "NSDate+StringFormatting.h"
 #import "NSMutableDictionary+Helpers.h"
+#import "NSString+Helpers.h"
 #import "ContextManager.h"
+#import <WordPress-iOS-Shared/NSString+XMLExtensions.h>
+
+@interface Post()
+@property (nonatomic, strong) NSString *storedContentPreviewForDisplay;
+@end
 
 @implementation Post
 
-@dynamic geolocation, tags, postFormat;
-@dynamic latitudeID, longitudeID, publicID;
+@dynamic commentCount;
+@dynamic likeCount;
+@dynamic geolocation;
+@dynamic tags;
+@dynamic postFormat;
+@dynamic latitudeID;
+@dynamic longitudeID;
+@dynamic publicID;
 @dynamic categories;
 @synthesize specialType;
+@synthesize storedContentPreviewForDisplay;
 
 #pragma mark - NSManagedObject subclass methods
+
+- (void)awakeFromFetch
+{
+    [super awakeFromFetch];
+
+    [self buildContentPreview];
+}
 
 - (void)didTurnIntoFault
 {
@@ -21,7 +42,28 @@
     self.specialType = nil;
 }
 
+- (void)willSave
+{
+    [super willSave];
+    if ([self isDeleted]) {
+        return;
+    }
+    [self buildContentPreview];
+}
+
+
 #pragma mark -
+
+- (void)buildContentPreview
+{
+    NSString *str = self.mt_excerpt;
+    if ([str length]) {
+        str = [NSString makePlainText:str];
+    } else {
+        str = [BasePost summaryFromContent:self.content];
+    }
+    self.storedContentPreviewForDisplay = str ? str : @"";
+}
 
 - (NSString *)categoriesText
 {
@@ -30,15 +72,7 @@
 
 - (NSString *)postFormatText
 {
-    NSDictionary *allFormats = self.blog.postFormats;
-    NSString *formatText = self.postFormat;
-    if ([allFormats objectForKey:self.postFormat]) {
-        formatText = [allFormats objectForKey:self.postFormat];
-    }
-    if ((formatText == nil || [formatText isEqualToString:@""]) && [allFormats objectForKey:@"standard"]) {
-        formatText = [allFormats objectForKey:@"standard"];
-    }
-    return formatText;
+    return [self.blog postFormatTextFromSlug:self.postFormat];
 }
 
 - (void)setPostFormatText:(NSString *)postFormatText
@@ -55,7 +89,7 @@
 
 - (void)setCategoriesFromNames:(NSArray *)categoryNames
 {
-    [self.categories removeAllObjects];
+    [self removeCategories:self.categories];
     NSMutableSet *categories = nil;
 
     for (NSString *categoryName in categoryNames) {
@@ -70,7 +104,7 @@
     }
 
     if (categories && (categories.count > 0)) {
-        self.categories = categories;
+        [self addCategories:categories];
     }
 }
 
@@ -140,5 +174,65 @@
     
     return NO;
 }
+
+#pragma mark - WPPostContentViewProvider Methods
+
+- (NSString *)titleForDisplay
+{
+    NSString *title = [self.postTitle stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] ?: @"";
+    title = [title stringByDecodingXMLCharacters];
+    if ([title length] == 0 && [[self contentPreviewForDisplay] length] == 0 && ![self hasRemote]) {
+        title = NSLocalizedString(@"(no title)", @"Let's a user know that a local draft does not have a title.");
+    }
+    return title;
+}
+
+- (NSString *)contentPreviewForDisplay
+{
+    if (self.storedContentPreviewForDisplay == nil) {
+        [self buildContentPreview];
+    }
+    return self.storedContentPreviewForDisplay;
+}
+
+- (NSString *)statusForDisplay
+{
+    NSString *statusString = [self statusTitle];
+    if ([self.status isEqualToString:PostStatusPublish] || [self.status isEqualToString:PostStatusDraft]) {
+        statusString = nil;
+    }
+    if (![self hasRemote]) {
+        NSString *localOnly = NSLocalizedString(@"Local", @"A status label for a post that only exists on the user's iOS device, and has not yet been published to their blog.");
+        if (statusString) {
+            statusString = [NSString stringWithFormat:@"%@, %@", statusString, localOnly];
+        } else {
+            statusString = localOnly;
+        }
+    }
+    return statusString;
+}
+
+- (NSURL *)featuredImageURLForDisplay
+{
+    NSURL *url = [NSURL URLWithString:self.pathForDisplayImage];
+    return url;
+}
+
+- (NSInteger)numberOfComments
+{
+    if (self.commentCount) {
+        return [self.commentCount integerValue];
+    }
+    return 0;
+}
+
+- (NSInteger)numberOfLikes
+{
+    if (self.likeCount) {
+        return [self.likeCount integerValue];
+    }
+    return 0;
+}
+
 
 @end

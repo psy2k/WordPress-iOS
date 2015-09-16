@@ -227,13 +227,14 @@
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
     WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
 
-    WPWebViewController *livePreviewController = [[WPWebViewController alloc] init];
-    livePreviewController.url = [NSURL URLWithString:self.theme.previewUrl];
+    NSURL *targetURL = [NSURL URLWithString:self.theme.previewUrl];
+    WPWebViewController *livePreviewController = [WPWebViewController webViewControllerWithURL:targetURL];
     livePreviewController.authToken = defaultAccount.authToken;
     livePreviewController.username = defaultAccount.username;
-    livePreviewController.password = defaultAccount.password;
     livePreviewController.wpLoginURL = [NSURL URLWithString:self.theme.blog.loginUrl];
-    [self.navigationController pushViewController:livePreviewController animated:YES];
+    
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:livePreviewController];
+    [self presentViewController:navController animated:YES completion:nil];
 }
 
 - (IBAction)activatePressed:(id)sender
@@ -243,18 +244,6 @@
     loading.center = CGPointMake(self.activateButton.bounds.size.width/2, self.activateButton.bounds.size.height/2);
     [self.activateButton setTitle:@"" forState:UIControlStateNormal];
     [self.activateButton addSubview:loading];
-
-    [self.theme activateThemeWithSuccess:^{
-        [WPAnalytics track:WPAnalyticsStatThemesChangedTheme];
-        [loading removeFromSuperview];
-        [UIView animateWithDuration:0.3 delay:0.2 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
-            [self showViewSite];
-        } completion:nil];
-    } failure:^(NSError *error) {
-        [loading removeFromSuperview];
-        [self.activateButton setTitle:NSLocalizedString(@"Activate", nil) forState:UIControlStateNormal];
-        [WPError showNetworkingAlertWithError:error];
-    }];
 }
 
 @end

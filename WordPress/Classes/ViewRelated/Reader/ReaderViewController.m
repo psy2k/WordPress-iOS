@@ -9,7 +9,6 @@
 #import "ReaderPostsViewController.h"
 #import "ReaderPostDetailViewController.h"
 #import "ReaderSubscriptionViewController.h"
-#import "ReaderTopic.h"
 #import "ReaderTopicService.h"
 #import "WPTabBarController.h"
 #import "WordPress-Swift.h"
@@ -49,13 +48,12 @@
     [self configureNavBar];
     [self configurePostsViewController];
 
-    ReaderTopic *topic = [self currentTopic];
+    ReaderAbstractTopic *topic = [self currentTopic];
     if (topic) {
         [self assignTopic:topic];
     } else {
         [self syncTopics];
     }
-
 }
 
 
@@ -77,7 +75,7 @@
     return [[ContextManager sharedInstance] mainContext];
 }
 
-- (ReaderTopic *)currentTopic
+- (ReaderAbstractTopic *)currentTopic
 {
     return [[[ReaderTopicService alloc] initWithManagedObjectContext:[self managedObjectContext]] currentTopic];
 }
@@ -121,13 +119,6 @@
 
 - (void)syncTopics
 {
-    // TODO: Should we check for an account?
-    NSManagedObjectContext *context = [self managedObjectContext];
-    AccountService *service = [[AccountService alloc] initWithManagedObjectContext:context];
-    if ([service numberOfAccounts] == 0) {
-        return;
-    }
-
     __weak __typeof(self) weakSelf = self;
     ReaderTopicService *topicService = [[ReaderTopicService alloc] initWithManagedObjectContext:[self managedObjectContext]];
     [topicService fetchReaderMenuWithSuccess:^{
@@ -137,7 +128,7 @@
     }];
 }
 
-- (void)assignTopic:(ReaderTopic *)topic
+- (void)assignTopic:(ReaderAbstractTopic *)topic
 {
     self.postsViewController.readerTopic = topic;
 

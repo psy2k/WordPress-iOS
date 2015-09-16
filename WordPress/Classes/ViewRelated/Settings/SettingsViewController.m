@@ -15,13 +15,10 @@
 
 #import "SettingsViewController.h"
 #import "WordPressComApi.h"
-#import "SettingsPageViewController.h"
-#import "NotificationSettingsViewController.h"
-#import "Blog+Jetpack.h"
 #import "SupportViewController.h"
 #import "WPAccount.h"
 #import "WPPostViewController.h"
-#import "WPTableViewSectionHeaderView.h"
+#import "WPTableViewSectionHeaderFooterView.h"
 #import "SupportViewController.h"
 #import "ContextManager.h"
 #import "NotificationsManager.h"
@@ -30,6 +27,7 @@
 #import "WPImageOptimizer.h"
 #import "Constants.h"
 #import "Mediaservice.h"
+#import "WPLookbackPresenter.h"
 #import <WordPress-iOS-Shared/WPTableViewCell.h>
 
 #ifdef LOOKBACK_ENABLED
@@ -43,12 +41,14 @@ typedef enum {
     SettingsSectionCount
 } SettingsSection;
 
+static NSString * const WPSettingsRestorationID = @"WPSettingsRestorationID";
+
 static CGFloat const HorizontalMargin = 16.0;
 static CGFloat const MediaSizeControlHeight = 44.0;
 static CGFloat const MediaSizeControlOffset = 12.0;
 static CGFloat const SettingsRowHeight = 44.0;
 
-@interface SettingsViewController ()
+@interface SettingsViewController () <UIViewControllerRestoration>
 
 @property (nonatomic, assign) BOOL showInternalBetaSection;
 @property (nonatomic, strong) UISlider *mediaSizeSlider;
@@ -59,10 +59,27 @@ static CGFloat const SettingsRowHeight = 44.0;
 
 @implementation SettingsViewController
 
++ (UIViewController *)viewControllerWithRestorationIdentifierPath:(NSArray *)identifierComponents coder:(NSCoder *)coder
+{
+    return [[self alloc] init];
+}
+
+- (instancetype)initWithStyle:(UITableViewStyle)style
+{
+    self = [super initWithStyle:style];
+    if (self) {
+        self.restorationIdentifier = WPSettingsRestorationID;
+        self.restorationClass = [self class];
+    }
+    return self;
+}
+
 - (void)dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
+
+#pragma mark - View lifecycle
 
 - (void)viewDidLoad
 {
@@ -110,7 +127,7 @@ static CGFloat const SettingsRowHeight = 44.0;
     UILabel *label = [[UILabel alloc] initWithFrame:frame];
     label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     label.font = [WPStyleGuide tableviewTextFont];
-    label.textColor = [WPStyleGuide whisperGrey];
+    label.textColor = [WPStyleGuide darkGrey];
     label.text = NSLocalizedString(@"Max Image Upload Size", @"Title for the image size settings option.");
     self.mediaCellTitleLabel = label;
 
@@ -129,8 +146,8 @@ static CGFloat const SettingsRowHeight = 44.0;
     UISlider *slider = [[UISlider alloc] initWithFrame:frame];
     slider.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     slider.continuous = YES;
-    slider.minimumTrackTintColor = [WPStyleGuide whisperGrey];
-    slider.maximumTrackTintColor = [WPStyleGuide whisperGrey];
+    slider.minimumTrackTintColor = [WPStyleGuide darkBlue];
+    slider.maximumTrackTintColor = [WPStyleGuide darkBlue];
     slider.minimumValue = MediaMinImageSizeDimension;
     slider.maximumValue = MediaMaxImageSizeDimension;
     slider.value = [MediaService maxImageSizeSetting].width;
@@ -187,7 +204,7 @@ static CGFloat const SettingsRowHeight = 44.0;
 #ifdef LOOKBACK_ENABLED
     UISwitch *aSwitch = (UISwitch *)sender;
     BOOL shakeForFeedback = aSwitch.on;
-    [[NSUserDefaults standardUserDefaults] setBool:shakeForFeedback forKey:WPInternalBetaShakeToPullUpFeedbackKey];
+    [[NSUserDefaults standardUserDefaults] setBool:shakeForFeedback forKey:WPLookbackPresenterShakeToPullUpFeedbackKey];
     [Lookback lookback].shakeToRecord = shakeForFeedback;
 #endif
 }
@@ -230,21 +247,21 @@ static CGFloat const SettingsRowHeight = 44.0;
 {
 	if (section == SettingsSectionEditor && ![WPPostViewController isNewEditorAvailable]) {
 		return nil;
-	} else {
-		WPTableViewSectionHeaderView *header = [[WPTableViewSectionHeaderView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.view.bounds), 0)];
-		header.title = [self titleForHeaderInSection:section];
-		return header;
 	}
+    
+    WPTableViewSectionHeaderFooterView *header = [[WPTableViewSectionHeaderFooterView alloc] initWithReuseIdentifier:nil style:WPTableViewSectionStyleHeader];
+    header.title = [self titleForHeaderInSection:section];
+    return header;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
 	if (section == SettingsSectionEditor && ![WPPostViewController isNewEditorAvailable]) {
 		return 1;
-	} else {
-		NSString *title = [self titleForHeaderInSection:section];
-		return [WPTableViewSectionHeaderView heightForTitle:title andWidth:CGRectGetWidth(self.view.bounds)];
 	}
+    
+    NSString *title = [self titleForHeaderInSection:section];
+    return [WPTableViewSectionHeaderFooterView heightForHeader:title width:CGRectGetWidth(self.view.bounds)];
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
@@ -301,10 +318,14 @@ static CGFloat const SettingsRowHeight = 44.0;
         aSwitch.on = [WPPostViewController isNewEditorEnabled];
         
     } else if (indexPath.section == SettingsSectionInternalBeta) {
+#ifndef LOOKBACK_ENABLED
+        NSAssert(NO, @"Should never execute this when Lookback is disabled.");
+#else
         cell.textLabel.text = NSLocalizedString(@"Shake for Feedback", @"Option to allow the user to shake the device to pull up the feedback mechanism");
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         UISwitch *aSwitch = (UISwitch *)cell.accessoryView;
-        aSwitch.on = [[NSUserDefaults standardUserDefaults] boolForKey:WPInternalBetaShakeToPullUpFeedbackKey];
+        aSwitch.on = [[NSUserDefaults standardUserDefaults] boolForKey:WPLookbackPresenterShakeToPullUpFeedbackKey];
+#endif
     }
 }
 

@@ -1,17 +1,33 @@
 #import "AbstractPost.h"
 #import "Media.h"
 #import "ContextManager.h"
+#import "NSDate+StringFormatting.h"
 
 @implementation AbstractPost
 
-@dynamic blog, media;
+@dynamic blog;
+@dynamic media;
+@dynamic metaIsLocal;
+@dynamic metaPublishImmediately;
 @dynamic comments;
+
+@synthesize restorableStatus;
+
++ (NSSet *)keyPathsForValuesAffectingValueForKey:(NSString *)key
+{
+    NSSet *keyPaths = [super keyPathsForValuesAffectingValueForKey:key];
+    if ([key isEqualToString:@"metaIsLocal"]) {
+        keyPaths = [keyPaths setByAddingObjectsFromArray:@[@"remoteStatusNumber"]];
+
+    } else if ([key isEqualToString:@"metaPublishImmediately"]) {
+        keyPaths = [keyPaths setByAddingObjectsFromArray:@[@"date_created_gmt"]];
+    }
+
+    return keyPaths;
+}
 
 - (void)remove
 {
-    for (Media *media in self.media) {
-        [media cancelUpload];
-    }
     [super remove];
 }
 
@@ -24,7 +40,24 @@
         // when wrong saving -- the app crashed for instance. So change our remote status to failed.
         [self setPrimitiveValue:@(AbstractPostRemoteStatusFailed) forKey:@"remoteStatusNumber"];
     }
+}
 
+- (void)setRemoteStatusNumber:(NSNumber *)remoteStatusNumber
+{
+    NSString *key = @"remoteStatusNumber";
+    [self willChangeValueForKey:key];
+    self.metaIsLocal = ([remoteStatusNumber integerValue] == AbstractPostRemoteStatusLocal);
+    [self setPrimitiveValue:remoteStatusNumber forKey:key];
+    [self didChangeValueForKey:key];
+}
+
+- (void)setDate_created_gmt:(NSDate *)date_created_gmt
+{
+    NSString *key = @"date_created_gmt";
+    [self willChangeValueForKey:key];
+    self.metaPublishImmediately = (date_created_gmt == nil);
+    [self setPrimitiveValue:date_created_gmt forKey:key];
+    [self didChangeValueForKey:key];
 }
 
 + (NSString *const)remoteUniqueIdentifier
@@ -157,35 +190,35 @@
 - (BOOL)hasPhoto
 {
     if ([self.media count] == 0) {
-        return false;
+        return NO;
     }
 
     if (self.featuredImage != nil) {
-        return true;
+        return YES;
     }
 
     for (Media *media in self.media) {
-        if (media.mediaType == MediaTypeImage || media.mediaType == MediaTypeFeatured) {
-            return true;
+        if (media.mediaType == MediaTypeImage) {
+            return YES;
         }
     }
 
-    return false;
+    return NO;
 }
 
 - (BOOL)hasVideo
 {
     if ([self.media count] == 0) {
-        return false;
+        return NO;
     }
 
     for (Media *media in self.media) {
         if (media.mediaType ==  MediaTypeVideo) {
-            return true;
+            return YES;
         }
     }
 
-    return false;
+    return NO;
 }
 
 - (BOOL)hasCategories
@@ -208,7 +241,7 @@
     NSSet *comments = [self.blog.comments filteredSetUsingPredicate:
                        [NSPredicate predicateWithFormat:@"(postID == %@) AND (post == NULL)", self.postID]];
     if ([comments count] > 0) {
-        [self.comments unionSet:comments];
+        [self addComments:comments];
     }
 }
 
@@ -225,24 +258,82 @@
     
     Media *featuredMedia = [[self.blog.media objectsPassingTest:^BOOL(id obj, BOOL *stop) {
         Media *media = (Media *)obj;
-        *stop = [self.post_thumbnail isEqualToNumber:media.mediaID];
+        if (media.mediaID) {
+            *stop = [self.post_thumbnail isEqualToNumber:media.mediaID];
+        }
         return *stop;
     }] anyObject];
 
     return featuredMedia;
 }
 
-#pragma mark - WPContentViewProvider protocol
+
+#pragma mark - WPPostContentViewProvider protocol
+
+- (NSString *)authorNameForDisplay
+{
+    return self.author;
+}
+
+- (NSURL *)avatarURLForDisplay
+{
+    return [NSURL URLWithString:self.blog.icon];
+}
 
 - (NSString *)blogNameForDisplay
 {
     return self.blog.blogName;
 }
 
-- (NSURL *)avatarURLForDisplay
+- (NSURL *)blogURL
 {
-    return [NSURL URLWithString:self.blog.blavatarUrl];
+    return [NSURL URLWithString:self.blog.url];
 }
+
+- (NSString *)blogURLForDisplay
+{
+    return self.blog.displayURL;
+}
+
+- (NSString *)blavatarForDisplay
+{
+    return self.blog.icon;
+}
+
+- (NSString *)contentPreviewForDisplay
+{
+    return self.mt_excerpt;
+}
+
+- (NSString *)dateStringForDisplay
+{
+    NSDate *date = [self dateCreated];
+    if (!date) {
+        return NSLocalizedString(@"Publish Immediately",@"A short phrase indicating a post is due to be immedately published.");
+    }
+    return [date shortString];
+}
+
+- (BOOL)supportsStats
+{
+    return [self.blog supports:BlogFeatureStats] && [self hasRemote];
+}
+
+- (BOOL)isPrivate
+{
+    return self.blog.isPrivate;
+}
+
+- (BOOL)isMultiAuthorBlog
+{
+    return self.blog.isMultiAuthor;
+}
+
+- (BOOL)isUploading
+{
+    return self.remoteStatus == AbstractPostRemoteStatusPushing;
+}
+
 
 #pragma mark - Post
 

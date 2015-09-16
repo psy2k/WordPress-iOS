@@ -1,18 +1,30 @@
 #import <Foundation/Foundation.h>
 #import <CoreData/CoreData.h>
 #import "BasePost.h"
+#import "WPPostContentViewProvider.h"
 
 @class Media;
+@class Comment;
 
-@interface AbstractPost : BasePost
+@interface AbstractPost : BasePost<WPPostContentViewProvider>
 
 // Relationships
 @property (nonatomic, strong) Blog *blog;
-@property (nonatomic, strong) NSMutableSet *media;
+@property (nonatomic, strong) NSSet *media;
 @property (weak, readonly) AbstractPost *original;
 @property (weak, readonly) AbstractPost *revision;
-@property (nonatomic, strong) NSMutableSet *comments;
+@property (nonatomic, strong) NSSet *comments;
 @property (nonatomic, strong) Media *featuredImage;
+
+// By convention these should be treated as read only and not manually set.
+// These are primarily used as helpers sorting fetchRequests.
+@property (nonatomic, assign) BOOL metaIsLocal;
+@property (nonatomic, assign) BOOL metaPublishImmediately;
+
+/**
+ Used to store the post's status before its sent to the trash.
+ */
+@property (nonatomic, strong) NSString *restorableStatus;
 
 // Revision management
 - (AbstractPost *)createRevision;
@@ -64,5 +76,19 @@
  *  @returns    YES if there are unsaved changes, NO otherwise.
  */
 - (BOOL)hasRemoteChanges;
+
+@end
+
+@interface AbstractPost (CoreDataGeneratedAccessors)
+
+- (void)addMediaObject:(Media *)value;
+- (void)removeMediaObject:(Media *)value;
+- (void)addMedia:(NSSet *)values;
+- (void)removeMedia:(NSSet *)values;
+
+- (void)addCommentsObject:(Comment *)value;
+- (void)removeCommentsObject:(Comment *)value;
+- (void)addComments:(NSSet *)values;
+- (void)removeComments:(NSSet *)values;
 
 @end

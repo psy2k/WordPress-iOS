@@ -18,9 +18,8 @@
 #import "ReaderPostUnattributedTableViewCell.h"
 #import "ReaderSiteService.h"
 #import "ReaderSubscriptionViewController.h"
-#import "ReaderTopic.h"
 #import "ReaderTopicService.h"
-#import "RebloggingViewController.h"
+#import "SourcePostAttribution.h"
 #import "UIView+Subviews.h"
 #import "WordPressAppDelegate.h"
 #import "WPAccount.h"
@@ -28,6 +27,7 @@
 #import "WPNoResultsView.h"
 #import "WPTableImageSource.h"
 #import "WPTabBarController.h"
+#import "WPWebViewController.h"
 #import "BlogService.h"
 
 #import "WPTableViewHandler.h"
@@ -46,12 +46,8 @@ NSString * const BlockedCellIdentifier = @"BlockedCellIdentifier";
 NSString * const FeaturedImageCellIdentifier = @"FeaturedImageCellIdentifier";
 NSString * const NoFeaturedImageCellIdentifier = @"NoFeaturedImageCellIdentifier";
 NSString * const RPVCDisplayedNativeFriendFinder = @"DisplayedNativeFriendFinder";
-NSString * const ReaderDetailTypeKey = @"post-detail-type";
-NSString * const ReaderDetailTypeNormal = @"normal";
-NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 
-@interface ReaderPostsViewController ()<RebloggingViewControllerDelegate,
-                                        UIActionSheetDelegate,
+@interface ReaderPostsViewController ()<UIActionSheetDelegate,
                                         WPContentSyncHelperDelegate,
                                         WPTableImageSourceDelegate,
                                         WPTableViewHandlerDelegate,
@@ -73,8 +69,8 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 @property (nonatomic) UIDeviceOrientation previousOrientation;
 @property (nonatomic) BOOL hasWPComAccount;
 @property (nonatomic) BOOL hasVisibleWPComAccount;
-
-@property (nonatomic, strong) NSManagedObjectContext *contextForSync;
+@property (nonatomic, strong) NSManagedObjectContext *displayContext;
+@property (nonatomic) BOOL cleanupAndRefreshAfterScrolling;
 
 @end
 
@@ -102,6 +98,8 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
         _syncHelper.delegate = self;
 
         _postIDsForUndoBlockCells = [NSMutableArray array];
+
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(didChangeAccount:) name:WPAccountDefaultWordPressComAccountChangedNotification object:nil];
     }
     return self;
 }
@@ -205,6 +203,15 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
     }
 
     [self.tableViewHandler refreshCachedRowHeightsForWidth:width];
+}
+
+
+#pragma mark - Notifications
+
+- (void)didChangeAccount:(NSNotification *)notification
+{
+    [self checkWPComAccountExists];
+    [self.tableView reloadData];
 }
 
 
@@ -392,7 +399,7 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 - (UIView *)noResultsAccessoryView
 {
     if (!self.animatedBox) {
-        self.animatedBox = [WPAnimatedBox new];
+        self.animatedBox = [WPAnimatedBox newAnimatedBox];
     }
     return self.animatedBox;
 }
@@ -414,20 +421,21 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
     return _activityFooter;
 }
 
-- (ReaderTopic *)topicInContext:(NSManagedObjectContext *)context
+- (ReaderAbstractTopic *)topicInContext:(NSManagedObjectContext *)context
 {
     return [self topic:self.readerTopic inContext:context];
 }
 
-- (ReaderTopic *)topic:(ReaderTopic *)topic inContext:(NSManagedObjectContext *)context
+- (ReaderAbstractTopic *)topic:(ReaderAbstractTopic *)topic inContext:(NSManagedObjectContext *)context
 {
-    ReaderTopic *topicInContext = (ReaderTopic *)[context objectWithID:topic.objectID];
+    NSError *error;
+    ReaderAbstractTopic *topicInContext = (ReaderAbstractTopic *)[context existingObjectWithID:topic.objectID error:&error];
     return topicInContext;
 }
 
-- (void)setReaderTopic:(ReaderTopic *)readerTopic
+- (void)setReaderTopic:(ReaderAbstractTopic *)readerTopic
 {
-    ReaderTopic *topic = readerTopic;
+    ReaderAbstractTopic *topic = readerTopic;
     if (!readerTopic) {
         topic = nil;
 
@@ -597,6 +605,19 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 - (void)blockSite:(ReaderPost *)post
 {
     NSNumber *postID = post.postID;
+
+    if (!postID) {
+        // Safety net.
+        DDLogError(@"Error blocking a site. The postID for the specified post was nil. %@", post);
+        UIAlertView *alert = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Could not block site", @"A short title of an error prompt shown when there was a problem trying to block a site.")
+                                                        message:NSLocalizedString(@"There was a problem blocking a site. Please refresh the post list and try again.", @"Error message explaining a site could not be blocked and to try refreshing the list of posts before attempting to block the site again.")
+                                                       delegate:nil
+                                              cancelButtonTitle:NSLocalizedString(@"OK", @"An 'OK' button that dismisses a dialog.")
+                                              otherButtonTitles:nil, nil];
+        [alert show];
+        return;
+    }
+
     self.tableViewHandler.updateRowAnimation = UITableViewRowAnimationFade;
     [self addBlockedPostID:postID];
 
@@ -680,7 +701,7 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 - (void)syncIfAppropriate
 {
     // Do not start auto-sync if connection is down
-    WordPressAppDelegate *appDelegate = [WordPressAppDelegate sharedWordPressApplicationDelegate];
+    WordPressAppDelegate *appDelegate = [WordPressAppDelegate sharedInstance];
     if (appDelegate.connectionAvailable == NO) {
         return;
     }
@@ -700,38 +721,22 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
         return;
     }
 
-    // Weird we should ever have a topic without an account but check for it just in case
-    NSManagedObjectContext *context = [self managedObjectContext];
-    AccountService *service = [[AccountService alloc] initWithManagedObjectContext:context];
-    if ([service numberOfAccounts] == 0) {
-        return;
-    }
-
-    // The synchelper only supports a single sync operation at a time. Since contextForSync is assigned
-    // in the delegate callbacks, and cleared when the sync operation is cleared up (or after scrolling
-    // finishes) there *should't* be an existing instance of the context when the synchelper's delegate
-    // methods are called. However, check here just in case there is an unnexpected edgecase. 
-    if (self.contextForSync) {
-        return;
-    }
-
     [self.syncHelper syncContentWithUserInteraction:userInteraction];
 }
 
-- (void)syncItemsWithSuccess:(void (^)(NSInteger, BOOL))success failure:(void (^)(NSError *))failure
+- (void)syncItemsWithSuccess:(void (^)(BOOL))success failure:(void (^)(NSError *))failure
 {
     DDLogMethod();
     __weak __typeof(self) weakSelf = self;
     NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
-    self.contextForSync = context;
     ReaderPostService *service = [[ReaderPostService alloc] initWithManagedObjectContext:context];
     [context performBlock:^{
-        ReaderTopic *topicInContext = [self topicInContext:context];
-        [service fetchPostsForTopic:topicInContext earlierThan:[NSDate date] skippingSave:YES success:^(NSInteger count, BOOL hasMore) {
+        ReaderAbstractTopic *topicInContext = [self topicInContext:context];
+        [service fetchPostsForTopic:topicInContext earlierThan:[NSDate date] success:^(NSInteger count, BOOL hasMore) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakSelf removeAllBlockedPostIDs];
                 if (success) {
-                    success(count, hasMore);
+                    success(hasMore);
                 }
             });
         } failure:^(NSError *error) {
@@ -744,20 +749,19 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
     }];
 }
 
-- (void)backfillItemsWithSuccess:(void (^)(NSInteger, BOOL))success failure:(void (^)(NSError *))failure
+- (void)backfillItemsWithSuccess:(void (^)(BOOL))success failure:(void (^)(NSError *))failure
 {
     DDLogMethod();
     __weak __typeof(self) weakSelf = self;
     NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
-    self.contextForSync = context;
     ReaderPostService *service = [[ReaderPostService alloc] initWithManagedObjectContext:context];
     [context performBlock:^{
-        ReaderTopic *topicInContext = [self topicInContext:context];
-        [service backfillPostsForTopic:topicInContext skippingSave:YES success:^(NSInteger count, BOOL hasMore) {
+        ReaderAbstractTopic *topicInContext = [self topicInContext:context];
+        [service backfillPostsForTopic:topicInContext success:^(NSInteger count, BOOL hasMore) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakSelf removeAllBlockedPostIDs];
                 if (success) {
-                    success(count, hasMore);
+                    success(hasMore);
                 }
             });
         } failure:^(NSError *error) {
@@ -770,7 +774,7 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
     }];
 }
 
-- (void)syncHelper:(WPContentSyncHelper *)syncHelper syncContentWithUserInteraction:(BOOL)userInteraction success:(void (^)(NSInteger, BOOL))success failure:(void (^)(NSError *))failure
+- (void)syncHelper:(WPContentSyncHelper *)syncHelper syncContentWithUserInteraction:(BOOL)userInteraction success:(void (^)(BOOL))success failure:(void (^)(NSError *))failure
 {
     DDLogMethod();
     self.shouldSkipRowAnimation = NO;
@@ -782,7 +786,7 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
     }
 }
 
-- (void)syncHelper:(WPContentSyncHelper *)syncHelper syncMoreWithSuccess:(void (^)(NSInteger, BOOL))success failure:(void (^)(NSError *))failure
+- (void)syncHelper:(WPContentSyncHelper *)syncHelper syncMoreWithSuccess:(void (^)(BOOL))success failure:(void (^)(NSError *))failure
 {
     DDLogMethod();
     if ([self.tableViewHandler.resultsController.fetchedObjects count] == 0) {
@@ -806,12 +810,12 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
     __weak __typeof(self) weakSelf = self;
     
     [context performBlock:^{
-        ReaderTopic *topicInContext = [self topicInContext:context];
+        ReaderAbstractTopic *topicInContext = [self topicInContext:context];
         [service fetchPostsForTopic:topicInContext earlierThan:earlierThan success:^(NSInteger count, BOOL hasMore){
             if (success) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     weakSelf.shouldSkipRowAnimation = YES;
-                    success(count, hasMore);
+                    success(hasMore);
                 });
             }
         } failure:^(NSError *error) {
@@ -828,43 +832,20 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 
 - (void)syncContentEnded
 {
-    if (!self.contextForSync) {
-        [self cleanupAfterRefresh];
-        return;
-    }
-    [self saveContextForSync];
-}
-
-- (void)saveContextForSync
-{
-    if (self.syncHelper.isSyncing) {
-        return;
-    }
-
     if (self.tableViewHandler.isScrolling) {
+        self.cleanupAndRefreshAfterScrolling = YES;
         return;
     }
-
-    self.tableViewHandler.shouldRefreshTableViewPreservingOffset = YES;
-    [[ContextManager sharedInstance] saveContext:self.contextForSync];
-    self.contextForSync = nil;
-
     [self cleanupAfterRefresh];
 }
 
 - (void)cleanupAfterRefresh
 {
+    self.cleanupAndRefreshAfterScrolling = NO;
+    [self.tableViewHandler refreshTableViewPreservingOffset];
     [self.refreshControl endRefreshing];
     [self.activityFooter stopAnimating];
-
-    [self.noResultsView removeFromSuperview];
-    if ([[self.tableViewHandler.resultsController fetchedObjects] count] == 0) {
-        // This is a special case.  Core data can be a bit slow about notifying
-        // NSFetchedResultsController delegates about changes to the fetched results.
-        // To compensate, call configureNoResultsView after a short delay.
-        // It will be redisplayed if necessary.
-        [self performSelector:@selector(configureNoResultsView) withObject:self afterDelay:0.1];
-    }
+    [self configureNoResultsView];
 }
 
 
@@ -872,9 +853,12 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 
 - (void)tableViewHandlerWillRefreshTableViewPreservingOffset:(WPTableViewHandler *)tableViewHandler
 {
-    [UIView performWithoutAnimation:^{
-        [self cleanupAfterRefresh];
-    }];
+    [[self managedObjectContext] reset];
+    NSError *error;
+    [self.tableViewHandler.resultsController performFetch:&error];
+    if (error) {
+        DDLogError(@"%@", error);
+    }
 }
 
 - (void)tableViewHandlerDidRefreshTableViewPreservingOffset:(WPTableViewHandler *)tableViewHandler
@@ -917,7 +901,11 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 
 - (NSManagedObjectContext *)managedObjectContext
 {
-    return [[ContextManager sharedInstance] mainContext];
+    if (!self.displayContext) {
+        self.displayContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
+        self.displayContext.parentContext = [[ContextManager sharedInstance] mainContext];
+    }
+    return self.displayContext;
 }
 
 - (NSFetchRequest *)fetchRequest
@@ -960,11 +948,10 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
 - (void)configurePostCell:(ReaderPostTableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
 {
     ReaderPost *post = (ReaderPost *)[self.tableViewHandler.resultsController objectAtIndexPath:indexPath];
-    BOOL shouldShowAttributionMenu = ([self isCurrentTopicFreshlyPressed] || (self.readerTopic.type != ReaderTopicTypeList)) ? YES : NO;
-    cell.postView.shouldShowAttributionMenu = shouldShowAttributionMenu;
-    cell.postView.canShowActionButtons = self.hasWPComAccount;
+    BOOL shouldShowAttributionMenu = ([self isCurrentTopicFreshlyPressed] || ([self.readerTopic isKindOfClass:[ReaderListTopic class]])) ? YES : NO;
+    cell.postView.shouldShowAttributionMenu = self.hasWPComAccount && shouldShowAttributionMenu;
+    cell.postView.shouldEnableLoggedinFeatures = self.hasWPComAccount;
     cell.postView.shouldShowAttributionButton = self.hasWPComAccount;
-    cell.postView.shouldHideReblogButton = !self.hasVisibleWPComAccount;
     [cell configureCell:post];
     [self setImageForPost:post forCell:cell indexPath:indexPath];
     [self setAvatarForPost:post forCell:cell indexPath:indexPath];
@@ -1077,68 +1064,40 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
         return;
     }
 
-    ReaderPostDetailViewController *detailController = [ReaderPostDetailViewController detailControllerWithPost:post];
+    ReaderPostDetailViewController *detailController;
+    if (([post sourceAttributionStyle] == SourceAttributionStylePost) &&
+        (post.sourceAttribution.blogID && post.sourceAttribution.postID)) {
+        // Display the source post.
+        detailController = [ReaderPostDetailViewController detailControllerWithPostID:post.sourceAttribution.postID
+                                                                               siteID:post.sourceAttribution.blogID];
+
+    } else {
+        detailController = [ReaderPostDetailViewController detailControllerWithPost:post];
+    }
+
     detailController.readerViewStyle = self.readerViewStyle;
     [self.navigationController pushViewController:detailController animated:YES];
-
-    NSString *detailType = (self.readerViewStyle == ReaderViewStyleNormal) ? ReaderDetailTypeNormal : ReaderDetailTypePreviewSite;
-    [WPAnalytics track:WPAnalyticsStatReaderOpenedArticle withProperties:@{ReaderDetailTypeKey:detailType}];
 }
 
 
 #pragma mark - ReaderPostContentView delegate methods
 
-- (void)postView:(ReaderPostContentView *)postView didReceiveReblogAction:(id)sender
-{
-    // Pass the image forward
-    ReaderPostTableViewCell *cell = [ReaderPostTableViewCell cellForSubview:sender];
-    NSIndexPath *indexPath = [self.tableView indexPathForCell:cell];
-    ReaderPost *post = (ReaderPost *)[self.tableViewHandler.resultsController objectAtIndexPath:indexPath];
-
-    RebloggingViewController *controller = [[RebloggingViewController alloc] initWithPost:post];
-    controller.delegate = self;
-    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:controller];
-    navController.modalPresentationStyle = UIModalPresentationFormSheet;
-    navController.modalTransitionStyle = UIModalTransitionStyleCoverVertical;
-    [self presentViewController:navController animated:YES completion:nil];
-}
-
 - (void)postView:(ReaderPostContentView *)postView didReceiveLikeAction:(id)sender
 {
     ReaderPost *post = [self postFromCellSubview:sender];
-    BOOL wasLiked = post.isLiked;
-    
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
+    NSManagedObjectContext *context = [self managedObjectContext];
     ReaderPostService *service = [[ReaderPostService alloc] initWithManagedObjectContext:context];
-    
-    [context performBlock:^{
-        ReaderPost *postInContext = (ReaderPost *)[context existingObjectWithID:post.objectID error:nil];
-        if (!postInContext) {
-            return;
-        }
-        
-        [service toggleLikedForPost:postInContext success:^{
-            if (wasLiked) {
-                return;
-            }
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [WPAnalytics track:WPAnalyticsStatReaderLikedArticle];
-            });
-        } failure:^(NSError *error) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                DDLogError(@"Error Liking Post : %@", [error localizedDescription]);
-                [postView updateActionButtons];
-            });
-        }];
+    [service toggleLikedForPost:post success:nil failure:^(NSError *error) {
+        DDLogError(@"Error Liking Post : %@", [error localizedDescription]);
+        [postView updateActionButtons];
     }];
-
     [postView updateActionButtons];
 }
 
 - (void)contentViewDidReceiveAvatarAction:(UIView *)contentView
 {
     ReaderPost *post = [self postFromCellSubview:contentView];
-    ReaderBrowseSiteViewController *controller = [[ReaderBrowseSiteViewController alloc] initWithPost:post];
+    ReaderBrowseSiteViewController *controller = [[ReaderBrowseSiteViewController alloc] initWithSiteID:post.siteID siteURL:post.blogURL isWPcom:post.isWPCom];
     [self.navigationController pushViewController:controller animated:YES];
     [WPAnalytics track:WPAnalyticsStatReaderPreviewedSite];
 }
@@ -1203,18 +1162,30 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
     [self.navigationController pushViewController:controller animated:YES];
 }
 
-
-#pragma mark - RebloggingViewController Delegate Methods
-
-- (void)postWasReblogged:(ReaderPost *)post
+- (void)postView:(ReaderPostContentView *)postView didTapDiscoverAttribution:(id)sender
 {
-    NSIndexPath *indexPath = [self.tableViewHandler.resultsController indexPathForObject:post];
-    if (!indexPath) {
+    ReaderPost *post = [self postFromCellSubview:sender];
+    if (!post.sourceAttribution) {
         return;
     }
-    ReaderPostTableViewCell *cell = (ReaderPostTableViewCell *)[self.tableView cellForRowAtIndexPath:indexPath];
-    [cell configureCell:post];
-    [self setAvatarForPost:post forCell:cell indexPath:indexPath];
+    if (post.sourceAttribution.blogID) {
+        ReaderBrowseSiteViewController *controller = [[ReaderBrowseSiteViewController alloc] initWithSiteID:post.sourceAttribution.blogID
+                                                                                                    siteURL:post.sourceAttribution.blogURL
+                                                                                                    isWPcom:YES];
+        [self.navigationController pushViewController:controller animated:YES];
+        return;
+    }
+
+
+    if (![post.sourceAttribution.attributionType isEqualToString:SourcePostAttributionTypeSite]) {
+        return;
+    }
+
+    NSURL *linkURL = [NSURL URLWithString:post.sourceAttribution.blogURL];
+
+    WPWebViewController *webViewController = [WPWebViewController webViewControllerWithURL:linkURL];
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:webViewController];
+    [self presentViewController:navController animated:YES completion:nil];
 }
 
 
@@ -1268,15 +1239,15 @@ NSString * const ReaderDetailTypePreviewSite = @"preview-site";
     if (decelerate) {
         return;
     }
-    if (self.contextForSync) {
-        [self saveContextForSync];
+    if (self.cleanupAndRefreshAfterScrolling) {
+        [self cleanupAfterRefresh];
     }
 }
 
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView
 {
-    if (self.contextForSync) {
-        [self saveContextForSync];
+    if (self.cleanupAndRefreshAfterScrolling) {
+        [self cleanupAfterRefresh];
     }
 }
 
