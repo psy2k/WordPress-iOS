@@ -18,6 +18,12 @@ const CGFloat MeHeaderViewVerticalSpacing = 10.0;
 
 @implementation MeHeaderView
 
+- (instancetype)init
+{
+    CGRect frame = CGRectMake(0, 0, 0, MeHeaderViewHeight);
+    return [self initWithFrame:frame];
+}
+
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
@@ -129,7 +135,7 @@ const CGFloat MeHeaderViewVerticalSpacing = 10.0;
     label.numberOfLines = 1;
     label.backgroundColor = [UIColor clearColor];
     label.opaque = YES;
-    label.textColor = [WPStyleGuide wordPressBlue];
+    label.textColor = [WPStyleGuide grey];
     label.font = [WPStyleGuide regularTextFont];
     label.adjustsFontSizeToFitWidth = NO;
     label.textAlignment = NSTextAlignmentCenter;

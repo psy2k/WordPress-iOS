@@ -1,9 +1,8 @@
 #import "CommentServiceRemoteREST.h"
 #import "WordPressComApi.h"
-#import "Blog.h"
 #import "RemoteComment.h"
 #import "NSDate+WordPressJSON.h"
-#import <NSObject+SafeExpectations.h>
+#import <NSObject_SafeExpectations/NSObject+SafeExpectations.h>
 
 static const NSInteger NumberOfCommentsToSync = 100;
 
@@ -13,19 +12,17 @@ static const NSInteger NumberOfCommentsToSync = 100;
 
 #pragma mark - Blog-centric methods
 
-- (void)getCommentsForBlog:(Blog *)blog
-                   success:(void (^)(NSArray *))success
-                   failure:(void (^)(NSError *))failure
+- (void)getCommentsWithSuccess:(void (^)(NSArray *))success
+                       failure:(void (^)(NSError *))failure
 {
-    [self getCommentsForBlog:blog options:nil success:success failure:failure];
+    [self getCommentsWithOptions:nil success:success failure:failure];
 }
 
-- (void)getCommentsForBlog:(Blog *)blog
-                   options:(NSDictionary *)options
-                   success:(void (^)(NSArray *posts))success
-                   failure:(void (^)(NSError *error))failure
+- (void)getCommentsWithOptions:(NSDictionary *)options
+                       success:(void (^)(NSArray *posts))success
+                       failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments", blog.dotComID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments", self.siteID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -55,15 +52,14 @@ static const NSInteger NumberOfCommentsToSync = 100;
 
 
 - (void)createComment:(RemoteComment *)comment
-              forBlog:(Blog *)blog
               success:(void (^)(RemoteComment *comment))success
               failure:(void (^)(NSError *))failure
 {
     NSString *path;
     if (comment.parentID) {
-        path = [NSString stringWithFormat:@"sites/%@/comments/%@/replies/new", blog.dotComID, comment.parentID];
+        path = [NSString stringWithFormat:@"sites/%@/comments/%@/replies/new", self.siteID, comment.parentID];
     } else {
-        path = [NSString stringWithFormat:@"sites/%@/posts/%@/replies/new", blog.dotComID, comment.postID];
+        path = [NSString stringWithFormat:@"sites/%@/posts/%@/replies/new", self.siteID, comment.postID];
     }
     
     NSString *requestUrl = [self pathForEndpoint:path
@@ -89,11 +85,10 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)updateComment:(RemoteComment *)comment
-              forBlog:(Blog *)blog
               success:(void (^)(RemoteComment *comment))success
               failure:(void (^)(NSError *))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", blog.dotComID, comment.commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", self.siteID, comment.commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -117,11 +112,10 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)moderateComment:(RemoteComment *)comment
-                forBlog:(Blog *)blog
                 success:(void (^)(RemoteComment *))success
                 failure:(void (^)(NSError *))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", blog.dotComID, comment.commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", self.siteID, comment.commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -145,11 +139,10 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)trashComment:(RemoteComment *)comment
-             forBlog:(Blog *)blog
              success:(void (^)())success
              failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/delete", blog.dotComID, comment.commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/delete", self.siteID, comment.commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -170,13 +163,12 @@ static const NSInteger NumberOfCommentsToSync = 100;
 #pragma mark Post-centric methods
 
 - (void)syncHierarchicalCommentsForPost:(NSNumber *)postID
-                               fromSite:(NSNumber *)siteID
                                    page:(NSUInteger)page
                                  number:(NSUInteger)number
                                 success:(void (^)(NSArray *comments))success
                                 failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/replies?order=ASC&hierarchical=1&page=%d&number=%d", siteID, postID, page, number];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/replies?order=ASC&hierarchical=1&page=%d&number=%d", self.siteID, postID, page, number];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
 
@@ -197,12 +189,11 @@ static const NSInteger NumberOfCommentsToSync = 100;
 #pragma mark - Public Methods
 
 - (void)updateCommentWithID:(NSNumber *)commentID
-                     siteID:(NSNumber *)siteID
                     content:(NSString *)content
                     success:(void (^)())success
                     failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", siteID, commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -224,12 +215,11 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)replyToPostWithID:(NSNumber *)postID
-                   siteID:(NSNumber *)siteID
                   content:(NSString *)content
                   success:(void (^)(RemoteComment *comment))success
                   failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/replies/new", siteID, postID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/replies/new", self.siteID, postID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -251,12 +241,11 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)replyToCommentWithID:(NSNumber *)commentID
-                      siteID:(NSNumber *)siteID
                      content:(NSString *)content
                      success:(void (^)(RemoteComment *comment))success
                      failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/replies/new", siteID, commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/replies/new", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -280,12 +269,11 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)moderateCommentWithID:(NSNumber *)commentID
-                       siteID:(NSNumber *)siteID
                        status:(NSString *)status
                       success:(void (^)())success
                       failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", siteID, commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -308,11 +296,10 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)trashCommentWithID:(NSNumber *)commentID
-                    siteID:(NSNumber *)siteID
                    success:(void (^)())success
                    failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/delete", siteID, commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/delete", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -330,11 +317,10 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)likeCommentWithID:(NSNumber *)commentID
-                   siteID:(NSNumber *)siteID
                   success:(void (^)())success
                   failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/likes/new", siteID, commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/likes/new", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -352,11 +338,10 @@ static const NSInteger NumberOfCommentsToSync = 100;
 }
 
 - (void)unlikeCommentWithID:(NSNumber *)commentID
-                     siteID:(NSNumber *)siteID
                     success:(void (^)())success
                     failure:(void (^)(NSError *error))failure
 {
-    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/likes/mine/delete", siteID, commentID];
+    NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/likes/mine/delete", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     

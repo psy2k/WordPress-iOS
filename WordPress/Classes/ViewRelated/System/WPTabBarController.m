@@ -1,5 +1,5 @@
 #import "WPTabBarController.h"
-#import <WordPress-iOS-Shared/UIImage+Util.h>
+#import <WordPressShared/UIImage+Util.h>
 
 #import "WordPressAppDelegate.h"
 #import "AccountService.h"
@@ -10,7 +10,6 @@
 
 #import "BlogListViewController.h"
 #import "BlogDetailsViewController.h"
-#import "MeViewController.h"
 #import "NotificationsViewController.h"
 #import "PostListViewController.h"
 #import "ReaderViewController.h"
@@ -19,13 +18,16 @@
 #import "WPLegacyEditPageViewController.h"
 #import "WPScrollableViewController.h"
 #import "HelpshiftUtils.h"
-#import <WordPress-iOS-Shared/WPDeviceIdentification.h>
+#import <WordPressShared/WPDeviceIdentification.h>
+#import "WPAppAnalytics.h"
+#import "WordPress-Swift.h"
 
 static NSString * const WPTabBarRestorationID = @"WPTabBarID";
 static NSString * const WPBlogListNavigationRestorationID = @"WPBlogListNavigationID";
 static NSString * const WPReaderNavigationRestorationID = @"WPReaderNavigationID";
 static NSString * const WPMeNavigationRestorationID = @"WPMeNavigationID";
 static NSString * const WPNotificationsNavigationRestorationID  = @"WPNotificationsNavigationID";
+static NSString * const WPTabBarButtonClassname = @"UITabBarButton";
 
 // used to restore the last selected tab bar item
 static NSString * const WPTabBarSelectedIndexKey = @"WPTabBarSelectedIndexKey";
@@ -41,9 +43,8 @@ NSString * const WPNewPostURLParamImageKey = @"image";
 static NSInteger const WPNotificationBadgeIconSize = 10;
 static NSInteger const WPNotificationBadgeIconVerticalOffsetFromTop = 5;
 static NSInteger const WPNotificationBadgeIconHorizontalOffsetFromCenter = 8;
-static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPadInPortrait = 108;
-static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPadInLandscape = 236;
-static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLandscape = 93;
+
+static NSInteger const WPTabBarIconOffset = 5;
 
 @interface WPTabBarController () <UITabBarControllerDelegate, UIViewControllerRestoration>
 
@@ -133,6 +134,17 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     [[UIApplication sharedApplication] removeObserver:self forKeyPath:WPApplicationIconBadgeNumberKeyPath];
 }
 
+- (void)setSelectedIndex:(NSUInteger)selectedIndex
+{
+    [super setSelectedIndex:selectedIndex];
+    if (selectedIndex == WPTabReader) {
+        // Bumping the stat in this method works for cases where the selected tab is
+        // set in response to other feature behavior (e.g. a notifications), and
+        // when set via state restoration.
+        [WPAnalytics track:WPAnalyticsStatReaderAccessed];
+    }
+}
+
 #pragma mark - UIViewControllerRestoration methods
 
 - (void)encodeRestorableStateWithCoder:(NSCoder *)coder
@@ -162,9 +174,8 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     _blogListNavigationController.tabBarItem.image = [mySitesTabBarImage imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     _blogListNavigationController.tabBarItem.selectedImage = mySitesTabBarImage;
     _blogListNavigationController.restorationIdentifier = WPBlogListNavigationRestorationID;
-    self.blogListViewController.title = NSLocalizedString(@"My Sites", @"");
-    [_blogListNavigationController.tabBarItem setTitlePositionAdjustment:self.tabBarTitleOffset];
-    _blogListNavigationController.tabBarItem.accessibilityIdentifier = NSLocalizedString(@"My Sites", @"");
+    _blogListNavigationController.tabBarItem.imageInsets = UIEdgeInsetsMake(WPTabBarIconOffset, 0, -1 * WPTabBarIconOffset, 0);
+    _blogListNavigationController.tabBarItem.accessibilityLabel = NSLocalizedString(@"My Sites", @"The accessibility value of the my sites tab.");
 
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
@@ -190,9 +201,9 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     UIImage *readerTabBarImage = [UIImage imageNamed:@"icon-tab-reader"];
     _readerNavigationController.tabBarItem.image = [readerTabBarImage imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     _readerNavigationController.tabBarItem.selectedImage = readerTabBarImage;
+    _readerNavigationController.tabBarItem.imageInsets = UIEdgeInsetsMake(WPTabBarIconOffset, -1 * WPTabBarIconOffset, -1 * WPTabBarIconOffset, WPTabBarIconOffset);
     _readerNavigationController.restorationIdentifier = WPReaderNavigationRestorationID;
-    [_readerNavigationController.tabBarItem setTitlePositionAdjustment:self.tabBarTitleOffset];
-    _readerNavigationController.tabBarItem.title = NSLocalizedString(@"Reader", @"Description of the Reader tab");
+    _readerNavigationController.tabBarItem.accessibilityLabel = NSLocalizedString(@"Reader", @"The accessibility value of the reader tab.");
 
     return _readerNavigationController;
 }
@@ -207,17 +218,8 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     newPostImage = [newPostImage imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     _newPostViewController = [[UIViewController alloc] init];
     _newPostViewController.tabBarItem.image = newPostImage;
-    _newPostViewController.tabBarItem.imageInsets = UIEdgeInsetsMake(5.0, 0, -5.0, 0);
-
-    /*
-     If title is used, the title will be visible. See #1158
-     If accessibilityLabel/Value are used, the "New Post" text is not read by VoiceOver
-
-     The only apparent solution is to have an actual title, and then move it out of view
-     non-VoiceOver users.
-     */
-    _newPostViewController.title = NSLocalizedString(@"New Post", @"The accessibility value of the post tab.");
-    _newPostViewController.tabBarItem.titlePositionAdjustment = UIOffsetMake(0, 20.0);
+    _newPostViewController.tabBarItem.imageInsets = UIEdgeInsetsMake(WPTabBarIconOffset, 0, -1 * WPTabBarIconOffset, 0);
+    _newPostViewController.tabBarItem.accessibilityLabel = NSLocalizedString(@"New Post", @"The accessibility value of the post tab.");
 
     return _newPostViewController;
 }
@@ -233,8 +235,9 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     UIImage *meTabBarImage = [UIImage imageNamed:@"icon-tab-me"];
     _meNavigationController.tabBarItem.image = [meTabBarImage imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     _meNavigationController.tabBarItem.selectedImage = meTabBarImage;
-    _meNavigationController.tabBarItem.titlePositionAdjustment = self.tabBarTitleOffset;
+    _meNavigationController.tabBarItem.imageInsets = UIEdgeInsetsMake(WPTabBarIconOffset, WPTabBarIconOffset, -1 * WPTabBarIconOffset, -1 * WPTabBarIconOffset);
     _meNavigationController.restorationIdentifier = WPMeNavigationRestorationID;
+    _meNavigationController.tabBarItem.accessibilityLabel = NSLocalizedString(@"Me", @"The accessibility value of the me tab.");
 
     return _meNavigationController;
 }
@@ -252,9 +255,9 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     UIImage *notificationsTabBarImage = [UIImage imageNamed:@"icon-tab-notifications"];
     _notificationsNavigationController.tabBarItem.image = [notificationsTabBarImage imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     _notificationsNavigationController.tabBarItem.selectedImage = notificationsTabBarImage;
+    _notificationsNavigationController.tabBarItem.imageInsets = UIEdgeInsetsMake(WPTabBarIconOffset, 0, -1 * WPTabBarIconOffset, 0);
     _notificationsNavigationController.restorationIdentifier = WPNotificationsNavigationRestorationID;
-    self.notificationsViewController.title = NSLocalizedString(@"Notifications", @"");
-    [_notificationsNavigationController.tabBarItem setTitlePositionAdjustment:self.tabBarTitleOffset];
+    _notificationsNavigationController.tabBarItem.accessibilityLabel = NSLocalizedString(@"Notifications", @"Notifications tab bar item accessibility label");
 
     return _notificationsNavigationController;
 }
@@ -288,6 +291,7 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
 
 - (void)showPostTabWithOptions:(NSDictionary *)options
 {
+    BOOL animated = YES;
     if (self.presentedViewController) {
         [self dismissViewControllerAnimated:NO completion:nil];
     }
@@ -296,13 +300,21 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     if ([WPPostViewController isNewEditorEnabled]) {
         WPPostViewController *editPostViewController;
         if (!options) {
-            [WPAnalytics track:WPAnalyticsStatEditorCreatedPost withProperties:@{ @"tap_source": @"tab_bar" }];
             editPostViewController = [[WPPostViewController alloc] initWithDraftForLastUsedBlog];
+            [WPAppAnalytics track:WPAnalyticsStatEditorCreatedPost withProperties:@{ @"tap_source": @"tab_bar"} withBlog:[editPostViewController post].blog];
         } else {
-            editPostViewController = [[WPPostViewController alloc] initWithTitle:[options stringForKey:WPNewPostURLParamTitleKey]
+            if (options[WPPostViewControllerOptionOpenMediaPicker]) {
+                editPostViewController = [[WPPostViewController alloc] initWithDraftForLastUsedBlogAndPhotoPost];
+            } else {
+                editPostViewController = [[WPPostViewController alloc] initWithTitle:[options stringForKey:WPNewPostURLParamTitleKey]
                                                                       andContent:[options stringForKey:WPNewPostURLParamContentKey]
                                                                          andTags:[options stringForKey:WPNewPostURLParamTagsKey]
                                                                         andImage:[options stringForKey:WPNewPostURLParamImageKey]];
+            }
+            
+            if (options[WPPostViewControllerOptionNotAnimated]) {
+                animated = NO;
+            }
         }
         navController = [[UINavigationController alloc] initWithRootViewController:editPostViewController];
         navController.restorationIdentifier = WPEditorNavigationRestorationID;
@@ -310,8 +322,11 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     } else {
         WPLegacyEditPostViewController *editPostLegacyViewController;
         if (!options) {
-            [WPAnalytics track:WPAnalyticsStatEditorCreatedPost withProperties:@{ @"tap_source": @"tab_bar" }];
             editPostLegacyViewController = [[WPLegacyEditPostViewController alloc] initWithDraftForLastUsedBlog];
+            NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+            BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+            Blog *blog = [blogService lastUsedOrFirstBlog];
+            [WPAppAnalytics track:WPAnalyticsStatEditorCreatedPost withProperties:@{ @"tap_source": @"tab_bar"} withBlog:blog];
         } else {
             editPostLegacyViewController = [[WPLegacyEditPostViewController alloc] initWithTitle:[options stringForKey:WPNewPostURLParamTitleKey]
                                                                                       andContent:[options stringForKey:WPNewPostURLParamContentKey]
@@ -326,7 +341,7 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     navController.modalPresentationStyle = UIModalPresentationFullScreen;
     navController.navigationBar.translucent = NO;
     [navController setToolbarHidden:NO]; // Make the toolbar visible here to avoid a weird left/right transition when the VC appears.
-    [self presentViewController:navController animated:YES completion:nil];
+    [self presentViewController:navController animated:animated completion:nil];
 }
 
 - (void)switchTabToPostsListForPost:(AbstractPost *)post
@@ -422,6 +437,9 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
                 }
             }
         }
+    } else if ([tabBarController.viewControllers indexOfObject:viewController] == WPTabReader && tabBarController.selectedIndex != WPTabReader) {
+        // Bump the accessed stat when switching to the reader tab, but not if the tab is tapped when already selected.
+        [WPAnalytics track:WPAnalyticsStatReaderAccessed];
     }
 
     // If the current view controller is selected already and it's at its root then scroll to the top
@@ -453,12 +471,6 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
 - (BOOL)isNavigatingMySitesTab
 {
     return (self.selectedIndex == WPTabMySites && [self.blogListViewController.navigationController.viewControllers count] > 1);
-}
-
-#pragma mark - Helpers
-
-- (UIOffset)tabBarTitleOffset {
-    return IS_IPHONE ? UIOffsetMake(0, -2) : UIOffsetZero;
 }
 
 #pragma mark - Helpshift Notifications
@@ -528,41 +540,27 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     self.notificationBadgeIconView.layer.borderWidth = 1.0;
     self.notificationBadgeIconView.hidden = YES;
     [self.tabBar addSubview:self.notificationBadgeIconView];
-
-    [self updateNotificationBadgeIconPosition];
-    [self updateNotificationBadgeVisibility];
 }
 
 - (void)updateNotificationBadgeIconPosition
 {
-    UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
-    BOOL isLandscape = (orientation == UIInterfaceOrientationLandscapeLeft) || (orientation == UIInterfaceOrientationLandscapeRight);
-
-    // We need to take the extra space before & after the tabbar into account for iPad and iPhone 6 Plus
-    CGFloat horizontalOffset = 0.0;
-    if (IS_IPAD) {
-        horizontalOffset = isLandscape ? WPNotificationBadgeIconHorizontalOffsetForIPadInLandscape : WPNotificationBadgeIconHorizontalOffsetForIPadInPortrait;
-    }
-    else if (isLandscape && WPDeviceIdentification.isiPhoneSixPlus) {
-        horizontalOffset = WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLandscape;
-    }
-    CGFloat verticalPosition = WPNotificationBadgeIconVerticalOffsetFromTop;
-    // Subtract the space before & after the tabbar
-    CGFloat tabBarContentWidth = self.tabBar.frame.size.width - (horizontalOffset * 2);
-    CGFloat tabItemWidth = tabBarContentWidth / self.tabBar.items.count;
-
-    // 0.5 is added to WPTabNotifications to get the center position of the tab
-    CGFloat notificationTabCenter = horizontalOffset + ((WPTabNotifications + 0.5) * tabItemWidth);
-    CGFloat horizontalPosition = notificationTabCenter - WPNotificationBadgeIconHorizontalOffsetFromCenter;
-
+    CGRect notificationsButtonFrame = [self lastTabBarButtonFrame];
     CGRect rect = self.notificationBadgeIconView.frame;
-    rect.origin.x = floorf(horizontalPosition);
-    rect.origin.y = floorf(verticalPosition);
+    rect.origin.y = WPNotificationBadgeIconVerticalOffsetFromTop;
+    rect.origin.x = CGRectGetMidX(notificationsButtonFrame) - WPNotificationBadgeIconHorizontalOffsetFromCenter;
     self.notificationBadgeIconView.frame = rect;
 }
 
 - (void)animateNotificationBadgeIcon
 {
+    // Note:
+    // We need to force a layout pass (*if needed*) right now. Otherwise, the view may get layed out
+    // at the middle of the animation, which may lead to inconsistencies.
+    //
+    [self.view layoutIfNeeded];
+    
+    // Scotty, beam me up!
+    //
     __weak __typeof(self) weakSelf = self;
     [UIView animateWithDuration:0.3 animations:^{
         weakSelf.notificationBadgeIconView.transform = CGAffineTransformMakeScale(1.5, 1.5);
@@ -587,23 +585,63 @@ static NSInteger const WPNotificationBadgeIconHorizontalOffsetForIPhone6PlusInLa
     }];
 }
 
-#pragma mark - Handling Rotations
+- (CGRect)lastTabBarButtonFrame
+{
+    // Hack:
+    // In this method, we determine the UITabBarController's last button frame.
+    // It's proven to be effective in *all* of the available devices to date, even in multitasking mode.
+    // Even better, we don't even need one constant per device.
+    // *If* this ever breaks, worst case scenario, we'll notice the assertion below (and of course, we'll fix it!).
+    //
+    CGRect lastButtonRect = CGRectZero;
+    
+    for (UIView *subview in self.tabBar.subviews) {
+        if ([WPTabBarButtonClassname isEqualToString:NSStringFromClass([subview class])]) {
+            if (CGRectGetMinX(subview.frame) > CGRectGetMinX(lastButtonRect)) {
+                lastButtonRect = subview.frame;
+            }
+        }
+    }
+    
+    NSAssert(!CGRectEqualToRect(lastButtonRect, CGRectZero), @"Couldn't determine the last TabBarButton Frame");
+    return lastButtonRect;
+}
+
+
+#pragma mark - Handling Layout
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    [self updateNotificationBadgeVisibility];
+}
+
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    [self updateNotificationBadgeIconPosition];
+}
 
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
 
     __weak __typeof(self) weakSelf = self;
-    [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
-        [weakSelf updateNotificationBadgeIconPosition];
-    }];
+    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+                                                [weakSelf updateNotificationBadgeIconPosition];
+                                            }
+                                 completion:nil];
 }
 
-- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation
+- (void)willTransitionToTraitCollection:(UITraitCollection *)newCollection withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
-    [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
-
-    [self updateNotificationBadgeIconPosition];
+    [super willTransitionToTraitCollection:newCollection withTransitionCoordinator:coordinator];
+    
+    __weak __typeof(self) weakSelf = self;
+    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+                                                [weakSelf updateNotificationBadgeIconPosition];
+                                            }
+                                 completion:nil];
 }
 
 @end

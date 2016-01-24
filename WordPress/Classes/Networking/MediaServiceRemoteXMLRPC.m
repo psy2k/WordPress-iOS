@@ -1,30 +1,14 @@
 #import "MediaServiceRemoteXMLRPC.h"
 #import "RemoteMedia.h"
-#import "Blog.h"
 #import <WordPressApi/WPXMLRPCClient.h>
-
-@interface MediaServiceRemoteXMLRPC ()
-@property (nonatomic) WPXMLRPCClient *api;
-@end
 
 @implementation MediaServiceRemoteXMLRPC
 
-- (id)initWithApi:(WPXMLRPCClient *)api
-{
-    self = [super init];
-    if (self) {
-        _api = api;
-    }
-
-    return self;
-}
-
 - (void)getMediaWithID:(NSNumber *)mediaID
-               forBlog:(Blog *)blog
                success:(void (^)(RemoteMedia *remoteMedia))success
                failure:(void (^)(NSError *error))failure
 {
-    NSArray *parameters = [blog getXMLRPCArgsWithExtra:mediaID];
+    NSArray *parameters = [self XMLRPCArgumentsWithExtra:mediaID];
     [self.api callMethod:@"wp.getMediaItem"
               parameters:parameters
                  success:^(AFHTTPRequestOperation *operation, id responseObject) {
@@ -40,11 +24,10 @@
                  }];
 }
 
-- (void)getMediaLibraryForBlog:(Blog *)blog
-                       success:(void (^)(NSArray *))success
-                       failure:(void (^)(NSError *))failure
+- (void)getMediaLibraryWithSuccess:(void (^)(NSArray *))success
+                           failure:(void (^)(NSError *))failure
 {
-    NSArray *parameters = [blog getXMLRPCArgsWithExtra:nil];
+    NSArray *parameters = [self defaultXMLRPCArguments];
     [self.api callMethod:@"wp.getMediaLibrary"
               parameters:parameters
                  success:^(AFHTTPRequestOperation *operation, id responseObject) {
@@ -60,11 +43,10 @@
                  }];
 }
 
-- (void)getMediaLibraryCountForBlog:(Blog *)blog
-                            success:(void (^)(NSInteger))success
-                            failure:(void (^)(NSError *))failure
+- (void)getMediaLibraryCountWithSuccess:(void (^)(NSInteger))success
+                                failure:(void (^)(NSError *))failure
 {
-    NSArray *parameters = [blog getXMLRPCArgsWithExtra:nil];
+    NSArray *parameters = [self defaultXMLRPCArguments];
     [self.api callMethod:@"wp.getMediaLibrary"
               parameters:parameters
                  success:^(AFHTTPRequestOperation *operation, id responseObject) {
@@ -123,7 +105,6 @@
 }
 
 - (void)createMedia:(RemoteMedia *)media
-            forBlog:(Blog *)blog
            progress:(NSProgress **)progress
             success:(void (^)(RemoteMedia *remoteMedia))success
             failure:(void (^)(NSError *error))failure
@@ -140,7 +121,7 @@
                            @"type": type,
                            @"bits": [NSInputStream inputStreamWithFileAtPath:path],
                            };
-    NSArray *parameters = [blog getXMLRPCArgsWithExtra:data];
+    NSArray *parameters = [self XMLRPCArgumentsWithExtra:data];
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     NSString *directory = [paths objectAtIndex:0];
     NSString *guid = [[NSProcessInfo processInfo] globallyUniqueString];

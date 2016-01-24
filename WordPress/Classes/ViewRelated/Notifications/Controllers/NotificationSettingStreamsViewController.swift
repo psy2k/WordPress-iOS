@@ -1,5 +1,7 @@
 import Foundation
-
+import MGImageUtilities
+import WordPressShared
+import WordPressComAnalytics
 
 /**
 *  @class           NotificationSettingStreamsViewController
@@ -55,8 +57,10 @@ public class NotificationSettingStreamsViewController : UITableViewController
         
         // Style!
         WPStyleGuide.configureColorsForView(view, andTableView: tableView)
+
+        tableView.cellLayoutMarginsFollowReadableWidth = false
     }
-    
+
     
     
     // MARK: - Public Helpers
@@ -65,7 +69,7 @@ public class NotificationSettingStreamsViewController : UITableViewController
         switch streamSettings.channel {
         case let .Blog(blogId):
             _ = blogId
-            title = streamSettings.blog?.blogName ?? streamSettings.channel.description()
+            title = streamSettings.blog?.settings?.name ?? streamSettings.channel.description()
         case .Other:
             title = NSLocalizedString("Other Sites", comment: "Other Notifications Streams Title")
         default:
@@ -144,6 +148,7 @@ public class NotificationSettingStreamsViewController : UITableViewController
         let stream                  = streamAtSection(indexPath.section)
         let disabled                = isDisabledDeviceStream(stream)
         
+        cell.imageView?.image       = imageForStreamKind(stream.kind)
         cell.textLabel?.text        = stream.kind.description() ?? String()
         cell.detailTextLabel?.text  = disabled ? NSLocalizedString("Off", comment: "Disabled") : String()
         cell.accessoryType          = .DisclosureIndicator
@@ -155,11 +160,25 @@ public class NotificationSettingStreamsViewController : UITableViewController
         return sortedStreams![section]
     }
     
+    private func imageForStreamKind(streamKind: NotificationSettings.Stream.Kind) -> UIImage? {
+        let imageName : String
+        switch streamKind {
+        case .Email:
+            imageName = "notifications-email"
+        case .Timeline:
+            imageName = "notifications-bell"
+        case .Device:
+            imageName = "notifications-phone"
+        }
+        
+        let tintColor = WPStyleGuide.greyLighten10()
+        return UIImage(named: imageName)?.imageTintedWithColor(tintColor)
+    }
     
     
     // MARK: - Disabled Push Notifications Helpers
     private func isDisabledDeviceStream(stream: NotificationSettings.Stream) -> Bool {
-        return stream.kind == .Device && !NotificationsManager.pushNotificationsEnabledInDeviceSettings()
+        return stream.kind == .Device && !PushNotificationsManager.sharedInstance.notificationsEnabledInDeviceSettings()
     }
     
     private func displayPushNotificationsAlert() {

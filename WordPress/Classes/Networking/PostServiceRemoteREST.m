@@ -1,23 +1,22 @@
 #import "PostServiceRemoteREST.h"
 #import "WordPressComApi.h"
-#import "BasePost.h"
-#import "Blog.h"
 #import "DisplayableImageHelper.h"
 #import "RemotePost.h"
 #import "RemotePostCategory.h"
 #import "NSDate+WordPressJSON.h"
 
+NSString * const PostRemoteStatusPublish = @"publish";
+NSString * const PostRemoteStatusScheduled = @"future";
+
 @implementation PostServiceRemoteREST
 
 - (void)getPostWithID:(NSNumber *)postID
-              forBlog:(Blog *)blog
               success:(void (^)(RemotePost *post))success
               failure:(void (^)(NSError *))failure
 {
     NSParameterAssert(postID);
-    NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@", blog.dotComID, postID];
+
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@", self.siteID, postID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -37,23 +36,20 @@
 }
 
 - (void)getPostsOfType:(NSString *)postType
-               forBlog:(Blog *)blog
                success:(void (^)(NSArray *))success
                failure:(void (^)(NSError *))failure
 {
-    [self getPostsOfType:postType forBlog:blog options:nil success:success failure:failure];
+    [self getPostsOfType:postType options:nil success:success failure:failure];
 }
 
 - (void)getPostsOfType:(NSString *)postType
-               forBlog:(Blog *)blog
                options:(NSDictionary *)options
                success:(void (^)(NSArray *))success
                failure:(void (^)(NSError *))failure
 {
     NSParameterAssert([postType isKindOfClass:[NSString class]]);
-    NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts", blog.dotComID];
+
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts", self.siteID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -82,14 +78,12 @@
 }
 
 - (void)createPost:(RemotePost *)post
-           forBlog:(Blog *)blog
            success:(void (^)(RemotePost *))success
            failure:(void (^)(NSError *))failure
 {
     NSParameterAssert([post isKindOfClass:[RemotePost class]]);
-    NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/new?context=edit", blog.dotComID];
+
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/new?context=edit", self.siteID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -110,14 +104,12 @@
 }
 
 - (void)updatePost:(RemotePost *)post
-           forBlog:(Blog *)blog
            success:(void (^)(RemotePost *))success
            failure:(void (^)(NSError *))failure
 {
     NSParameterAssert([post isKindOfClass:[RemotePost class]]);
-    NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@?context=edit", blog.dotComID, post.postID];
+
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@?context=edit", self.siteID, post.postID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -138,15 +130,12 @@
 }
 
 - (void)deletePost:(RemotePost *)post
-           forBlog:(Blog *)blog
            success:(void (^)())success
            failure:(void (^)(NSError *))failure
 {
     NSParameterAssert([post isKindOfClass:[RemotePost class]]);
-    NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    NSParameterAssert(blog.dotComID != nil);
-    
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/delete", blog.dotComID, post.postID];
+
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/delete", self.siteID, post.postID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -164,15 +153,12 @@
 }
 
 - (void)trashPost:(RemotePost *)post
-          forBlog:(Blog *)blog
           success:(void (^)(RemotePost *))success
           failure:(void (^)(NSError *))failure
 {
     NSParameterAssert([post isKindOfClass:[RemotePost class]]);
-    NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    NSParameterAssert(blog.dotComID != nil);
-    
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/delete", blog.dotComID, post.postID];
+
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/delete", self.siteID, post.postID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -191,15 +177,12 @@
 }
 
 - (void)restorePost:(RemotePost *)post
-            forBlog:(Blog *)blog
             success:(void (^)(RemotePost *))success
             failure:(void (^)(NSError *))failure
 {
     NSParameterAssert([post isKindOfClass:[RemotePost class]]);
-    NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    NSParameterAssert(blog.dotComID != nil);
-    
-    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/restore", blog.dotComID, post.postID];
+
+    NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/restore", self.siteID, post.postID];
     NSString *requestUrl = [self pathForEndpoint:path
                                      withVersion:ServiceRemoteRESTApiVersion_1_1];
     
@@ -337,8 +320,8 @@
     // Passing a status of 'future' will set the post status to 'draft'
     // This is an apparent inconsistency in the API as 'future' should
     // be a valid status.
-    if ([post.status isEqualToString:PostStatusScheduled]) {
-        post.status = PostStatusPublish;
+    if ([post.status isEqualToString:PostRemoteStatusScheduled]) {
+        post.status = PostRemoteStatusPublish;
     }
     parameters[@"status"] = post.status;
 

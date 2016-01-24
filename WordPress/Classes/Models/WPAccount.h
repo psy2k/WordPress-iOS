@@ -1,11 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <CoreData/CoreData.h>
 
-#import <WordPressApi/WordPressApi.h>
-
 #import "WordPressComApi.h"
 
 @class Blog;
+@class ManagedAccountSettings;
 
 @interface WPAccount : NSManagedObject
 
@@ -23,6 +22,7 @@
 @property (nonatomic, strong)   NSSet       *jetpackBlogs;
 @property (nonatomic, readonly) NSArray     *visibleBlogs;
 @property (nonatomic, strong)   Blog        *defaultBlog;
+@property (nonatomic, strong)   ManagedAccountSettings *managedSettings;
 
 /**
  The OAuth2 auth token for WordPress.com accounts

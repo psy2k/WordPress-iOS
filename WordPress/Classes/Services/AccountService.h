@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import "LocalCoreDataService.h"
 
+NS_ASSUME_NONNULL_BEGIN
+
 @class WPAccount, Blog;
 
 extern NSString *const WPAccountDefaultWordPressComAccountChangedNotification;
@@ -21,7 +23,7 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
  @see setDefaultWordPressComAccount:
  @see removeDefaultWordPressComAccount
  */
-- (WPAccount *)defaultWordPressComAccount;
+- (nullable WPAccount *)defaultWordPressComAccount;
 
 /**
  Sets the default WordPress.com account
@@ -66,7 +68,15 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
  @param username the account's username
  @return a `WPAccount` object if there's one for the specified username. Otherwise it returns nil
  */
-- (WPAccount *)findAccountWithUsername:(NSString *)username;
+- (nullable WPAccount *)findAccountWithUsername:(NSString *)username;
+
+/**
+ Returns a WordPress.com account with the specified user ID, if it exists
+
+ @param userID the account's user ID
+ @return a `WPAccount` object if there's one for the specified username. Otherwise it returns nil
+ */
+- (nullable WPAccount *)findAccountWithUserID:(NSNumber *)userID;
 
 /**
  Updates user details including username, email, userID, avatarURL, and default blog.
@@ -83,4 +93,15 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
  */
 - (void)purgeAccount:(WPAccount *)account;
 
+///--------------------
+/// @name Visible blogs
+///--------------------
+
+/**
+ Sets the visibility for the given blogs
+ */
+- (void)setVisibility:(BOOL)visible forBlogs:(NSArray *)blogs;
+
 @end
+
+NS_ASSUME_NONNULL_END

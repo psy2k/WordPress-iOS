@@ -10,6 +10,7 @@
 
 #import "NSString+Helpers.h"
 #import "NSString+XMLExtensions.h"
+#import "WordPress-Swift.h"
 
 static NSString * const DefaultDotcomAccountUUIDDefaultsKey = @"AccountDefaultDotcomUUID";
 static NSString * const DefaultDotcomAccountPasswordRemovedKey = @"DefaultDotcomAccountPasswordRemovedKey";
@@ -73,13 +74,22 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     [[NSUserDefaults standardUserDefaults] synchronize];
 
     NSManagedObjectID *accountID = account.objectID;
-    dispatch_async(dispatch_get_main_queue(), ^{
+    void (^notifyAccountChange)() = ^{
         NSManagedObjectContext *mainContext = [[ContextManager sharedInstance] mainContext];
         NSManagedObject *accountInContext = [mainContext existingObjectWithID:accountID error:nil];
         [[NSNotificationCenter defaultCenter] postNotificationName:WPAccountDefaultWordPressComAccountChangedNotification object:accountInContext];
 
-        [NotificationsManager registerForPushNotifications];
-    });
+        [[PushNotificationsManager sharedInstance] registerForRemoteNotifications];
+        [[InteractiveNotificationsHandler sharedInstance] registerForUserNotifications];
+    };
+    if ([NSThread isMainThread]) {
+        // This is meant to help with testing account observers.
+        // Short version: dispatch_async and XCTest asynchronous helpers don't play nice with each other
+        // Long version: see the comment in https://github.com/wordpress-mobile/WordPress-iOS/blob/2f9a2100ca69d8f455acec47a1bbd6cbc5084546/WordPress/WordPressTest/AccountServiceRxTests.swift#L7
+        notifyAccountChange();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), notifyAccountChange);
+    }
 }
 
 /**
@@ -91,8 +101,8 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
 - (void)removeDefaultWordPressComAccount
 {
     NSAssert([NSThread isMainThread], @"This method should only be called from the main thread");
-    
-    [NotificationsManager unregisterDeviceToken];
+
+    [[PushNotificationsManager sharedInstance] unregisterDeviceToken];
 
     WPAccount *account = [self defaultWordPressComAccount];
     if (account) {
@@ -179,6 +189,16 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     return [results firstObject];
 }
 
+- (WPAccount *)findAccountWithUserID:(NSNumber *)userID
+{
+    NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:@"Account"];
+    [request setPredicate:[NSPredicate predicateWithFormat:@"userID = %@", userID]];
+    [request setIncludesPendingChanges:YES];
+
+    NSArray *results = [self.managedObjectContext executeFetchRequest:request error:nil];
+    return [results firstObject];
+}
+
 - (void)updateUserDetailsForAccount:(WPAccount *)account success:(void (^)())success failure:(void (^)(NSError *error))failure
 {
     NSAssert(account, @"Account can not be nil");
@@ -218,6 +238,10 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     account.displayName = userDetails.displayName;
     if (userDetails.primaryBlogID) {
         account.defaultBlog = [[account.blogs filteredSetUsingPredicate:[NSPredicate predicateWithFormat:@"blogID = %@", userDetails.primaryBlogID]] anyObject];
+
+        NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+        BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+        [blogService flagBlogAsLastUsed:account.defaultBlog];
     }
     [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
 }
@@ -237,6 +261,29 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
         DDLogWarn(@"Removing account since it has no blogs associated and it's not the default account: %@", account);
         [self.managedObjectContext deleteObject:account];
     }
+}
+
+///--------------------
+/// @name Visible blogs
+///--------------------
+
+- (void)setVisibility:(BOOL)visible forBlogs:(NSArray *)blogs
+{
+    NSMutableDictionary *blogVisibility = [NSMutableDictionary dictionaryWithCapacity:blogs.count];
+    for (Blog *blog in blogs) {
+        NSAssert(blog.dotComID.unsignedIntegerValue > 0, @"blog should have a wp.com ID");
+        NSAssert([blog.account isEqual:[self defaultWordPressComAccount]], @"blog should belong to the default account");
+        // This shouldn't happen, but just in case, let's not crash if
+        // something tries to change visibility for a self hosted
+        if (blog.dotComID) {
+            blogVisibility[blog.dotComID] = @(visible);
+        }
+        blog.visible = visible;
+    }
+    AccountServiceRemoteREST *remote = [self remoteForAccount:[self defaultWordPressComAccount]];
+    [remote updateBlogsVisibility:blogVisibility success:nil failure:^(NSError *error) {
+        DDLogError(@"Error setting blog visibility: %@", error);
+    }];
 }
 
 @end

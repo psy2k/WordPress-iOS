@@ -12,7 +12,7 @@
 #import "WPSearchController.h"
 #import "WPStyleGuide+Posts.h"
 #import "WPTableViewHandler.h"
-#import <WordPress-iOS-Shared/WPStyleGuide.h>
+#import <WordPressShared/WPStyleGuide.h>
 #import "WordPress-swift.h"
 #import "WPSearchControllerConfigurator.h"
 
@@ -27,12 +27,11 @@ extern const NSInteger PostsFetchRequestBatchSize;
 extern const NSInteger PostsLoadMoreThreshold;
 extern const CGSize PreferredFiltersPopoverContentSize;
 
-@interface AbstractPostListViewController () <UIPopoverControllerDelegate,
-                                                        WPContentSyncHelperDelegate,
-                                                        WPNoResultsViewDelegate,
-                                                        WPSearchControllerDelegate,
-                                                        WPSearchResultsUpdating,
-                                                        WPTableViewHandlerDelegate>
+@interface AbstractPostListViewController () <WPContentSyncHelperDelegate,
+                                                WPNoResultsViewDelegate,
+                                                WPSearchControllerDelegate,
+                                                WPSearchResultsUpdating,
+                                                WPTableViewHandlerDelegate>
 
 @property (nonatomic, strong) UITableViewController *postListViewController;
 @property (nonatomic, weak) UITableView *tableView;
@@ -51,7 +50,6 @@ extern const CGSize PreferredFiltersPopoverContentSize;
 @property (nonatomic, weak) IBOutlet NSLayoutConstraint *authorsFilterViewHeightConstraint;
 @property (nonatomic, weak) IBOutlet NSLayoutConstraint *searchWrapperViewHeightConstraint;
 @property (nonatomic, strong) WPSearchController *searchController; // Stand-in for UISearchController
-@property (nonatomic, strong) UIPopoverController *postFilterPopoverController;
 @property (nonatomic, strong) NSArray *postListFilters;
 @property (nonatomic, strong) NSMutableArray *recentlyTrashedPostObjectIDs; // IDs of trashed posts. Cleared on refresh or when filter changes.
 

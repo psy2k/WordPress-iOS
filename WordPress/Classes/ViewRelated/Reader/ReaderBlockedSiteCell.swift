@@ -1,6 +1,7 @@
 import Foundation
+import WordPressShared.WPStyleGuide
 
- public class ReaderBlockedSiteCell: UITableViewCell
+public class ReaderBlockedSiteCell: UITableViewCell
 {
 
     @IBOutlet private weak var label: UILabel!

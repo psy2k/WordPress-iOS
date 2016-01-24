@@ -11,7 +11,7 @@
 #import "PostFeaturedImageCell.h"
 #import "PostGeolocationCell.h"
 #import "PostGeolocationViewController.h"
-#import "PostSettingsSelectionViewController.h"
+#import "SettingsSelectionViewController.h"
 #import "PublishDatePickerView.h"
 #import "WPTextFieldTableViewCell.h"
 #import "WordPressAppDelegate.h"
@@ -23,8 +23,9 @@
 #import "WPProgressTableViewCell.h"
 #import "WPAndDeviceMediaLibraryDataSource.h"
 #import <WPMediaPicker/WPMediaPicker.h>
+#import <Photos/Photos.h>
 #import "WPGUIConstants.h"
-#import <AssetsLibrary/AssetsLibrary.h>
+#import "WordPress-Swift.h"
 
 typedef enum {
     PostSettingsRowCategories = 0,
@@ -60,7 +61,6 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 @property (nonatomic, strong) UIImage *featuredImage;
 @property (nonatomic, strong) PublishDatePickerView *datePicker;
 @property (assign) BOOL *textFieldDidHaveFocusBeforeOrientationChange;
-@property (nonatomic, strong) UIPopoverController *popover;
 @property (nonatomic, assign) BOOL *shouldHideStatusBar;
 @property (nonatomic, assign) BOOL *isUploadingMedia;
 @property (nonatomic, strong) NSProgress *featuredImageProgress;
@@ -94,6 +94,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 
     DDLogInfo(@"%@ %@", self, NSStringFromSelector(_cmd));
 
+    [WPStyleGuide resetReadableMarginsForTableView:self.tableView];
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
 
     self.visibilityList = @[NSLocalizedString(@"Public", @"Privacy setting for posts set to 'Public' (default). Should be the same as in core WP."),
@@ -291,7 +292,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     [self.sections addObject:[NSNumber numberWithInteger:PostSettingsSectionFormat]];
     [self.sections addObject:[NSNumber numberWithInteger:PostSettingsSectionFeaturedImage]];
 
-    if (self.post.blog.geolocationEnabled || self.post.geolocation) {
+    if (self.post.blog.settings.geolocationEnabled || self.post.geolocation) {
         [self.sections addObject:[NSNumber numberWithInteger:PostSettingsSectionGeolocation]];
     }
 }
@@ -763,8 +764,8 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
                                  @"Values" : statuses,
                                  @"CurrentValue" : self.apost.status
                                  };
-    PostSettingsSelectionViewController *vc = [[PostSettingsSelectionViewController alloc] initWithDictionary:statusDict];
-    __weak PostSettingsSelectionViewController *weakVc = vc;
+    SettingsSelectionViewController *vc = [[SettingsSelectionViewController alloc] initWithDictionary:statusDict];
+    __weak SettingsSelectionViewController *weakVc = vc;
     vc.onItemSelected = ^(NSString *status) {
         self.apost.status = status;
         [weakVc dismiss];
@@ -786,8 +787,8 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
                                     @"Titles" : titles,
                                     @"Values" : titles,
                                     @"CurrentValue" : [self titleForVisibility]};
-    PostSettingsSelectionViewController *vc = [[PostSettingsSelectionViewController alloc] initWithDictionary:visiblityDict];
-    __weak PostSettingsSelectionViewController *weakVc = vc;
+    SettingsSelectionViewController *vc = [[SettingsSelectionViewController alloc] initWithDictionary:visiblityDict];
+    __weak SettingsSelectionViewController *weakVc = vc;
     vc.onItemSelected = ^(NSString *visibility) {
         [weakVc dismiss];
         
@@ -850,8 +851,8 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         @"CurrentValue"   : post.postFormatText
     };
 
-    PostSettingsSelectionViewController *vc = [[PostSettingsSelectionViewController alloc] initWithDictionary:postFormatsDict];
-    __weak PostSettingsSelectionViewController *weakVc = vc;
+    SettingsSelectionViewController *vc = [[SettingsSelectionViewController alloc] initWithDictionary:postFormatsDict];
+    __weak SettingsSelectionViewController *weakVc = vc;
     vc.onItemSelected = ^(NSString *status) {
         // Check if the object passed is indeed an NSString, otherwise we don't want to try to set it as the post format
         if ([status isKindOfClass:[NSString class]]) {
@@ -894,14 +895,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     picker.delegate = self;
     picker.allowMultipleSelection = NO;
     picker.showMostRecentFirst = YES;
-    if (IS_IPAD) {
-        self.popover = [[UIPopoverController alloc] initWithContentViewController:picker];
-        CGRect frame = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:PostSettingsSectionFeaturedImage]];
-        self.popover.delegate = self;
-        [self.popover presentPopoverFromRect:frame inView:self.view permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
-    } else {
-        [self presentViewController:picker animated:YES completion:nil];
-    }
+    [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)showCategoriesSelection
@@ -969,15 +963,14 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     return _imageSource;
 }
 
-- (void)uploadFeatureImage:(ALAsset *)asset
+- (void)uploadFeatureImage:(PHAsset *)asset
 {
     NSProgress * convertingProgress = [NSProgress progressWithTotalUnitCount:1];
-    [convertingProgress setUserInfoObject:[UIImage imageWithCGImage:asset.thumbnail] forKey:WPProgressImageThumbnailKey];
     convertingProgress.localizedDescription = NSLocalizedString(@"Preparing...",@"Label to show while converting and/or resizing media to send to server");
     self.featuredImageProgress = convertingProgress;
     __weak __typeof(self) weakSelf = self;
     MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
-    [mediaService createMediaWithAsset:asset forPostObjectID:self.apost.objectID completion:^(Media *media, NSError * error) {
+    [mediaService createMediaWithPHAsset:asset forPostObjectID:self.apost.objectID completion:^(Media *media, NSError * error) {
         if (!weakSelf) {
             return;
         }
@@ -1098,16 +1091,10 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         return;
     }
     
-    if ([[assets firstObject] isKindOfClass:[ALAsset class]]){
-        ALAsset *asset = [assets firstObject];
-        if (!asset.defaultRepresentation) {
-            [WPError showAlertWithTitle:NSLocalizedString(@"Image unavailable", @"The title for an alert that says the image the user selected isn't available.")
-                                message:NSLocalizedString(@"This Photo Stream image cannot be added to your WordPress. Try saving it to your Camera Roll before uploading.", @"User information explaining that the image is not available locally. This is normally related to share photo stream images.")  withSupportButton:NO];
-            return;
-        }
-        
+    if ([[assets firstObject] isKindOfClass:[PHAsset class]]){
+        PHAsset *asset = [assets firstObject];
         self.isUploadingMedia = YES;
-        [self uploadFeatureImage:assets[0]];
+        [self uploadFeatureImage:asset];
     } else if ([[assets firstObject] isKindOfClass:[Media class]]){
         Media *media = [assets firstObject];
         if ([media.mediaID intValue] != 0) {
@@ -1119,11 +1106,8 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         }
     }
     
-    if (IS_IPAD) {
-        [self.popover dismissPopoverAnimated:YES];
-    } else {
-        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
-    }
+    [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+
     // Reload the featured image row so that way the activity indicator will be displayed.
     NSIndexPath *featureImageCellPath = [NSIndexPath indexPathForRow:0 inSection:[self.sections indexOfObject:@(PostSettingsSectionFeaturedImage)]];
     [self.tableView reloadRowsAtIndexPaths:@[featureImageCellPath]
@@ -1131,24 +1115,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 }
 
 - (void)mediaPickerControllerDidCancel:(WPMediaPickerViewController *)picker {
-    if (IS_IPAD) {
-        [self.popover dismissPopoverAnimated:YES];
-    } else {
-        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
-    }
-}
-
-#pragma mark - UIPopoverControllerDelegate methods
-- (void)popoverController:(UIPopoverController *)popoverController willRepositionPopoverToRect:(inout CGRect *)rect inView:(inout UIView *__autoreleasing *)view
-{
-    *rect = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:PostSettingsSectionFeaturedImage]];
-}
-
-- (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController
-{
-    // Reset delegate and nil popover property
-    self.popover.delegate = nil;
-    self.popover = nil;
+    [self.navigationController dismissViewControllerAnimated:YES completion:nil];
 }
 
 #pragma mark - Status bar management

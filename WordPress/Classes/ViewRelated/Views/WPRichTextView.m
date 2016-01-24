@@ -25,6 +25,7 @@ NSString * const WPRichTextDefaultFontName = @"Merriweather";
 @property (nonatomic) BOOL needsCheckPendingDownloadsAfterDelay;
 @property (nonatomic, strong, readwrite) NSAttributedString *attributedString;
 @property (nonatomic) BOOL shouldPreventPendingMediaLayout;
+@property (nonatomic, strong) NSString *urlPathToCopy;
 
 @end
 
@@ -93,6 +94,22 @@ NSString * const WPRichTextDefaultFontName = @"Merriweather";
     }
     return self;
 }
+
+- (instancetype)initWithCoder:(NSCoder *)aDecoder
+{
+    self = [super initWithCoder:aDecoder];
+    if (self) {
+        _mediaArray = [NSMutableArray array];
+        _mediaIndexPathsNeedingLayout = [NSMutableArray array];
+        _mediaIndexPathsPendingDownload = [NSMutableArray array];
+        _textOptions = [[self class] defaultDTCoreTextOptions];
+        _textContentView = [self buildTextContentView];
+        [self addSubview:self.textContentView];
+        [self configureConstraints];
+    }
+    return self;
+}
+
 
 - (void)layoutSubviews
 {
@@ -254,12 +271,23 @@ NSString * const WPRichTextDefaultFontName = @"Merriweather";
     // this point has no effect.  Dispatch async will let us refresh layout in a new loop
     // and correctly update.
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self refreshMediaLayout];
+        [self refreshLayout];
 
         if ([self.delegate respondsToSelector:@selector(richTextViewDidLoadMediaBatch:)]) {
             [self.delegate richTextViewDidLoadMediaBatch:self]; // So the delegate can correct its size.
         }
     });
+}
+
+- (void)refreshLayout
+{
+    // If image frames need to be updated `relayoutTextContentView` will be
+    // called automatically.
+    if ([self refreshLayoutForMediaInArray:self.mediaArray]) {
+        return;
+    }
+
+    [self relayoutTextContentView];
 }
 
 - (void)refreshMediaLayout
@@ -269,7 +297,7 @@ NSString * const WPRichTextDefaultFontName = @"Merriweather";
 
 - (CGSize)maxImageDisplaySize
 {
-    CGRect screenRect = [[UIScreen mainScreen] applicationFrame];
+    CGRect screenRect = [[UIScreen mainScreen] bounds];
     CGFloat insets = self.edgeInsets.left + self.edgeInsets.right;
     CGFloat side = MAX(CGRectGetWidth(screenRect) - insets, CGRectGetHeight(screenRect) - insets);
     return CGSizeMake(side, side);
@@ -346,7 +374,7 @@ NSString * const WPRichTextDefaultFontName = @"Merriweather";
     [self refreshLayoutForMediaInArray:arr];
 }
 
-- (void)refreshLayoutForMediaInArray:(NSArray *)media
+- (BOOL)refreshLayoutForMediaInArray:(NSArray *)media
 {
     BOOL frameChanged = NO;
 
@@ -359,6 +387,8 @@ NSString * const WPRichTextDefaultFontName = @"Merriweather";
     if (frameChanged) {
         [self relayoutTextContentView];
     }
+
+    return frameChanged;
 }
 
 - (BOOL)updateLayoutForMediaItem:(id<WPRichTextMediaAttachment>)media
@@ -477,6 +507,45 @@ NSString * const WPRichTextDefaultFontName = @"Merriweather";
 }
 
 
+#pragma mark - Longpress Gesture and Copy Menu
+
+- (void)handleLinkLongPress:(UIGestureRecognizer *)recognizer
+{
+    if ([recognizer state] != UIGestureRecognizerStateBegan) {
+        return;
+    }
+
+    DTLinkButton *button = (DTLinkButton *)recognizer.view;
+    NSLog(@"%@", button.URL);
+    self.urlPathToCopy = button.URL.absoluteString;
+
+    [self becomeFirstResponder];
+    CGPoint location = [recognizer locationInView:self];
+    CGRect frame = CGRectMake(location.x, location.y, 0.0, 0.0);
+    UIMenuController *menuController = [UIMenuController sharedMenuController];
+    [menuController setTargetRect:frame inView:self];
+    [menuController setMenuVisible:YES animated:YES];
+}
+
+- (void)copy:(id)sender {
+    // called when copy clicked in menu
+    [UIPasteboard generalPasteboard].string = self.urlPathToCopy;
+}
+
+// Menu controller checks this to see what options to display
+- (BOOL)canPerformAction:(SEL)selector withSender:(id)sender {
+    if (selector == @selector(copy:)) {
+        return YES;
+    }
+    return NO;
+}
+
+// Must return YES in order to show the menu controller.
+- (BOOL)canBecomeFirstResponder {
+    return YES;
+}
+
+
 #pragma mark - DTCoreAttributedTextContentView Delegate Methods
 
 - (UIView *)attributedTextContentView:(DTAttributedTextContentView *)attributedTextContentView viewForAttributedString:(NSAttributedString *)string frame:(CGRect)frame
@@ -501,6 +570,10 @@ NSString * const WPRichTextDefaultFontName = @"Merriweather";
 
     // use normal push action for opening URL
     [button addTarget:self action:@selector(linkAction:) forControlEvents:UIControlEventTouchUpInside];
+
+    UILongPressGestureRecognizer *lpgr = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLinkLongPress:)];
+    lpgr.cancelsTouchesInView = YES;
+    [button addGestureRecognizer:lpgr];
 
     return button;
 }

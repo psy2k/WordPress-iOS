@@ -1,8 +1,14 @@
 #import <OCMock/OCMock.h>
+#import <OHHTTPStubs/OHHTTPStubs.h>
+#import <OHHTTPStubs/OHPathHelpers.h>
 #import <XCTest/XCTest.h>
 #import "Blog.h"
 #import "BlogServiceRemoteREST.h"
 #import "WordPressComApi.h"
+#import "WordPress-Swift.h"
+#import "WordPressTests-Swift.h"
+
+static NSTimeInterval const TestExpectationTimeout = 5;
 
 @interface BlogServiceRemoteRESTTests : XCTestCase
 @end
@@ -20,30 +26,18 @@
     BlogServiceRemoteREST *service = nil;
     
     NSString* url = [NSString stringWithFormat:@"v1.1/sites/%@/users", blog.dotComID];
-    
+
     OCMStub([api GET:[OCMArg isEqual:url]
           parameters:[OCMArg isKindOfClass:[NSDictionary class]]
              success:[OCMArg isNotNil]
              failure:[OCMArg isNotNil]]);
     
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api]);
+    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api siteID:blog.dotComID]);
     
-    [service checkMultiAuthorForBlog:blog
-                             success:^(BOOL isMultiAuthor) {}
-                             failure:^(NSError *error) {}];
+    [service checkMultiAuthorWithSuccess:^(BOOL isMultiAuthor) {}
+                                 failure:^(NSError *error) {}];
 }
 
-
-- (void)testThatCheckMultiAuthorForBlogThrowsExceptionWithoutBlog
-{
-    WordPressComApi *api = OCMStrictClassMock([WordPressComApi class]);
-    BlogServiceRemoteREST *service = nil;
-    
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api]);
-    XCTAssertThrows([service checkMultiAuthorForBlog:nil
-                                             success:^(BOOL isMultiAuthor) {}
-                                             failure:^(NSError *error) {}]);
-}
 
 #pragma mark - Synchronizing options for a blog
 
@@ -62,23 +56,12 @@
              success:[OCMArg isNotNil]
              failure:[OCMArg isNotNil]]);
     
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api]);
+    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api siteID:blog.dotComID]);
     
-    [service syncOptionsForBlog:blog
-                        success:^(NSDictionary *options) {}
-                        failure:^(NSError *error) {}];
+    [service syncOptionsWithSuccess:^(NSDictionary *options) {}
+                            failure:^(NSError *error) {}];
 }
 
-- (void)testThatSyncOptionForBlogThrowsExceptionWithoutBlog
-{
-    WordPressComApi *api = OCMStrictClassMock([WordPressComApi class]);
-    BlogServiceRemoteREST *service = nil;
-    
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api]);
-    XCTAssertThrows([service syncOptionsForBlog:nil
-                                        success:^(NSDictionary *options) {}
-                                        failure:^(NSError *error) {}]);
-}
 
 #pragma mark - Synchronizing post formats for a blog
 
@@ -97,22 +80,82 @@
              success:[OCMArg isNotNil]
              failure:[OCMArg isNotNil]]);
     
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api]);
+    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api siteID:blog.dotComID]);
     
-    [service syncPostFormatsForBlog:blog
-                            success:^(NSDictionary *options) {}
-                            failure:^(NSError *error) {}];
+    [service syncPostFormatsWithSuccess:^(NSDictionary *options) {}
+                                failure:^(NSError *error) {}];
 }
 
-- (void)testThatSyncPostFormatsForBlogThrowsExceptionWithoutBlog
+
+#pragma mark - Blog Settings
+
+- (void)testSyncBlogSettingsParsesCorrectlyEveryField
 {
-    WordPressComApi *api = OCMStrictClassMock([WordPressComApi class]);
-    BlogServiceRemoteREST *service = nil;
+    NSNumber *blogID                = @(123);
+    NSString *path                  = [NSString stringWithFormat:@"v1.1/sites/%@/settings", blogID];
+    NSString *mockResponse          = @"rest-site-settings.json";
     
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api]);
-    XCTAssertThrows([service syncPostFormatsForBlog:nil
-                                            success:^(NSDictionary *options) {}
-                                            failure:^(NSError *error) {}]);
+    WordPressComApi *api            = [WordPressComApi anonymousApi];
+    BlogServiceRemoteREST *service  = [[BlogServiceRemoteREST alloc] initWithApi:api siteID:blogID];
+    XCTAssertNotNil(service, @"Error while creating the new service");
+    
+    [OHHTTPStubs stubRequestsPassingTest:^BOOL(NSURLRequest *request) {
+        return [[request.URL absoluteString] containsString:path];
+    } withStubResponse:^OHHTTPStubsResponse *(NSURLRequest *request) {
+        NSString* fixture = OHPathForFile(mockResponse, self.class);
+        return [OHHTTPStubsResponse responseWithFileAtPath:fixture
+                                                statusCode:200 headers:@{@"Content-Type":@"application/json"}];
+    }];
+
+    XCTestExpectation *expectation = [self expectationWithDescription:@"Site Settings"];
+    
+    [service syncSettingsWithSuccess:^(RemoteBlogSettings *settings) {
+        // General
+        XCTAssertEqualObjects(settings.name, @"My Epic Blog", @"");
+        XCTAssertEqualObjects(settings.tagline, @"Definitely, the best blog out there", @"");
+        XCTAssertEqualObjects(settings.privacy, @(1), @"");
+        
+        // Writing
+        XCTAssertEqualObjects(settings.defaultCategoryID, @(8), @"");
+        XCTAssertEqualObjects(settings.defaultPostFormat, @"standard", @"");
+        
+        // Comments
+        XCTAssertEqualObjects(settings.commentsAllowed, @(true), @"");
+        XCTAssertEqualObjects(settings.commentsBlacklistKeys, @"some evil keywords", @"");
+        XCTAssertEqualObjects(settings.commentsCloseAutomatically, @(false), @"");
+        XCTAssertEqualObjects(settings.commentsCloseAutomaticallyAfterDays, @(3000), @"");
+
+        XCTAssertEqualObjects(settings.commentsFromKnownUsersWhitelisted, @(true), @"");
+        XCTAssertEqualObjects(settings.commentsMaximumLinks, @(42), @"");
+
+        XCTAssertEqualObjects(settings.commentsModerationKeys, @"moderation keys", @"");
+
+        XCTAssertEqualObjects(settings.commentsPagingEnabled, @(true), @"");
+        XCTAssertEqualObjects(settings.commentsPageSize, @(5), @"");
+
+        XCTAssertEqualObjects(settings.commentsRequireManualModeration, @(true), @"");
+        XCTAssertEqualObjects(settings.commentsRequireNameAndEmail, @(false), @"");
+        XCTAssertEqualObjects(settings.commentsRequireRegistration, @(true), @"");
+        XCTAssertEqualObjects(settings.commentsSortOrder, @"desc", @"");
+        XCTAssertEqualObjects(settings.commentsThreadingDepth, @(5), @"");
+        XCTAssertEqualObjects(settings.commentsThreadingEnabled, @(true), @"");
+        XCTAssertEqualObjects(settings.pingbackInboundEnabled, @(true), @"");
+        XCTAssertEqualObjects(settings.pingbackOutboundEnabled, @(true), @"");
+
+        // Related Posts
+        XCTAssertEqualObjects(settings.relatedPostsAllowed, @(true), @"");
+        XCTAssertEqualObjects(settings.relatedPostsEnabled, @(false), @"");
+        XCTAssertEqualObjects(settings.relatedPostsShowHeadline, @(true), @"");
+        XCTAssertEqualObjects(settings.relatedPostsShowThumbnails, @(false), @"");
+        
+        [expectation fulfill];
+        
+    } failure:^(NSError *error) {
+        XCTAssertNil(error, @"We shouldn't be getting any errors");
+        [expectation fulfill];
+    }];
+    
+    [self waitForExpectationsWithTimeout:TestExpectationTimeout handler:nil];
 }
 
 @end

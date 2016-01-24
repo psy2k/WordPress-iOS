@@ -17,6 +17,7 @@
 @dynamic displayName;
 @dynamic userID;
 @dynamic avatarURL;
+@dynamic managedSettings;
 @synthesize restApi = _restApi;
 
 #pragma mark - NSManagedObject subclass methods
@@ -107,8 +108,11 @@
 - (NSArray *)visibleBlogs
 {
     NSSet *visibleBlogs = [self.blogs filteredSetUsingPredicate:[NSPredicate predicateWithFormat:@"visible = YES"]];
-    NSArray *sortedBlogs = [visibleBlogs sortedArrayUsingDescriptors:@[[NSSortDescriptor sortDescriptorWithKey:@"blogName" ascending:YES selector:@selector(localizedCaseInsensitiveCompare:)]]];
-    return sortedBlogs;
+    NSSortDescriptor *descriptor = [NSSortDescriptor sortDescriptorWithKey:@"settings.name"
+                                                                 ascending:YES
+                                                                  selector:@selector(localizedCaseInsensitiveCompare:)];
+
+    return [visibleBlogs sortedArrayUsingDescriptors:@[descriptor]];
 }
 
 #pragma mark - API Helpers

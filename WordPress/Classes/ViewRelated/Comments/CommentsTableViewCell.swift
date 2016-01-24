@@ -1,5 +1,5 @@
 import Foundation
-
+import WordPressShared.WPTableViewCell
 
 public class CommentsTableViewCell : WPTableViewCell
 {
@@ -44,21 +44,9 @@ public class CommentsTableViewCell : WPTableViewCell
         
         let placeholderImage = Style.gravatarPlaceholderImage(isApproved: approved)
 
-        if url == nil {
-            gravatarImageView.image = placeholderImage
-            return
-        }
-        
-        let size        = gravatarImageView.frame.width * UIScreen.mainScreen().scale
-        let scaledURL   = url!.patchGravatarUrlWithSize(size)
-        
-        gravatarImageView.downloadImage(scaledURL,
-            placeholderImage    : placeholderImage,
-            success             :   { (image: UIImage) in
-                                        self.gravatarImageView.displayImageWithFadeInAnimation(image)
-                                    },
-            failure             : nil)
-        
+        let gravatar = url.flatMap { Gravatar($0) }
+        gravatarImageView.downloadGravatar(gravatar, placeholder: placeholderImage, animate: true)
+
         gravatarURL = url
     }
     
@@ -81,21 +69,9 @@ public class CommentsTableViewCell : WPTableViewCell
         assert(detailsLabel != nil)
         assert(timestampImageView != nil)
         assert(timestampLabel != nil)
-        assert(detailsLeadingConstraint != nil)
-        assert(detailsTrailingConstraint != nil)
         
         separatorsView.bottomVisible = true
         separatorsView.bottomInsets = separatorInsets
-    }
-    
-    public override func layoutSubviews() {
-        // Calculate the TextView's width, before hitting layoutSubviews!
-        var maxDetailsWidth = bounds.width
-        maxDetailsWidth     -= detailsLeadingConstraint.constant + detailsTrailingConstraint.constant
-        maxDetailsWidth     -= gravatarImageView.frame.maxX
-        detailsLabel.preferredMaxLayoutWidth = maxDetailsWidth
-        
-        super.layoutSubviews()
     }
     
     public override func setSelected(selected: Bool, animated: Bool) {
@@ -115,6 +91,7 @@ public class CommentsTableViewCell : WPTableViewCell
     // MARK: - Private Helpers
     private func refreshDetailsLabel() {
         detailsLabel.attributedText = attributedDetailsText(approved)
+        layoutIfNeeded()
     }
     
     private func refreshTimestampLabel() {
@@ -190,12 +167,10 @@ public class CommentsTableViewCell : WPTableViewCell
     private var gravatarURL : NSURL?
     
     // MARK: - IBOutlets
-    @IBOutlet private var layoutView                : UIView!
-    @IBOutlet private var separatorsView            : SeparatorsView!
-    @IBOutlet private var gravatarImageView         : CircularImageView!
-    @IBOutlet private var detailsLabel              : UILabel!
-    @IBOutlet private var timestampImageView        : UIImageView!
-    @IBOutlet private var timestampLabel            : UILabel!
-    @IBOutlet private var detailsLeadingConstraint  : NSLayoutConstraint!
-    @IBOutlet private var detailsTrailingConstraint : NSLayoutConstraint!
+    @IBOutlet private var layoutView            : UIView!
+    @IBOutlet private var separatorsView        : SeparatorsView!
+    @IBOutlet private var gravatarImageView     : CircularImageView!
+    @IBOutlet private var detailsLabel          : UILabel!
+    @IBOutlet private var timestampImageView    : UIImageView!
+    @IBOutlet private var timestampLabel        : UILabel!
 }

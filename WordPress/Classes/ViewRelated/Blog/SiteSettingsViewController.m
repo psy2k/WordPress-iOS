@@ -9,7 +9,6 @@
 #import "SettingTableViewCell.h"
 #import "NotificationsManager.h"
 #import <SVProgressHUD/SVProgressHUD.h>
-#import <NSDictionary+SafeExpectations.h>
 #import "NotificationsManager.h"
 #import "AccountService.h"
 #import "ContextManager.h"
@@ -22,8 +21,12 @@
 #import "PostCategoryService.h"
 #import "PostCategory.h"
 #import "PostCategoriesViewController.h"
-#import "PostSettingsSelectionViewController.h"
+#import "SettingsSelectionViewController.h"
 #import "BlogSiteVisibilityHelper.h"
+#import "RelatedPostsSettingsViewController.h"
+#import "WordPress-Swift.h"
+#import <WordPressApi/WordPressApi.h>
+
 
 NS_ENUM(NSInteger, SiteSettingsGeneral) {
     SiteSettingsGeneralTitle = 0,
@@ -43,6 +46,7 @@ NS_ENUM(NSInteger, SiteSettingsWriting) {
     SiteSettingsWritingGeotagging = 0,
     SiteSettingsWritingDefaultCategory,
     SiteSettingsWritingDefaultPostFormat,
+    SiteSettingsWritingRelatedPosts,
     SiteSettingsWritingCount,
 };
 
@@ -50,15 +54,12 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
     SiteSettingsSectionGeneral = 0,
     SiteSettingsSectionAccount,
     SiteSettingsSectionWriting,
+    SiteSettingsSectionDiscussion,
     SiteSettingsSectionRemoveSite,
 };
 
-NS_ENUM(NSInteger, SiteSettinsAlertTag) {
-    SiteSettinsAlertTagSiteRemoval = 201,
-};
 
-@interface SiteSettingsViewController () <UITableViewDelegate, UITextFieldDelegate,
-UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate>
+@interface SiteSettingsViewController () <UITableViewDelegate, UITextFieldDelegate, PostCategoriesViewControllerDelegate>
 
 @property (nonatomic, strong) NSArray *tableSections;
 #pragma mark - General Section
@@ -70,10 +71,13 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
 @property (nonatomic, strong) SettingTableViewCell *usernameTextCell;
 @property (nonatomic, strong) SettingTableViewCell *passwordTextCell;
 #pragma mark - Writing Section
-@property (nonatomic, strong) SettingTableViewCell *geotaggingCell;
+@property (nonatomic, strong) SwitchTableViewCell *geotaggingCell;
 @property (nonatomic, strong) SettingTableViewCell *defaultCategoryCell;
 @property (nonatomic, strong) SettingTableViewCell *defaultPostFormatCell;
-
+@property (nonatomic, strong) SettingTableViewCell *relatedPostsCell;
+#pragma mark - Discussion
+@property (nonatomic, strong) SettingTableViewCell *discussionSettingsCell;
+#pragma mark - Removal Section
 @property (nonatomic, strong) UITableViewCell *removeSiteCell;
 
 @property (nonatomic, strong) Blog *blog;
@@ -82,10 +86,6 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
 @property (nonatomic, strong) NSString *username;
 @property (nonatomic, strong) NSString *password;
 @property (nonatomic, assign) BOOL geolocationEnabled;
-@property (nonatomic, assign) BOOL isSiteDotCom;
-
-@property (nonatomic, assign) BOOL isKeyboardVisible;
-
 @end
 
 @implementation SiteSettingsViewController
@@ -93,6 +93,7 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
 - (instancetype)initWithBlog:(Blog *)blog
 {
     NSParameterAssert([blog isKindOfClass:[Blog class]]);
+    
     self = [super initWithStyle:UITableViewStyleGrouped];
     if (self) {
         _blog = blog;
@@ -111,18 +112,25 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     [super viewDidLoad];
     self.navigationItem.title = NSLocalizedString(@"Settings", @"Title for screen that allows configuration of your blog/site settings.");
     
-    if (self.blog.account) {
-        self.tableSections = @[@(SiteSettingsSectionGeneral)];
-    } else {
-        self.tableSections = @[@(SiteSettingsSectionGeneral), @(SiteSettingsSectionAccount)];
-    }    
-    if (self.blog.isAdmin) {
-        self.tableSections = [self.tableSections arrayByAddingObject:@(SiteSettingsSectionWriting)];
-    }
-    if ([self.blog supports:BlogFeatureRemovable]) {
-        self.tableSections = [self.tableSections arrayByAddingObject:@(SiteSettingsSectionRemoveSite)];
+    NSMutableArray *sections = [NSMutableArray arrayWithObjects:@(SiteSettingsSectionGeneral), nil];
+    
+    if (!self.blog.account) {
+        [sections addObject:@(SiteSettingsSectionAccount)];
     }
     
+    [sections addObject:@(SiteSettingsSectionWriting)];
+    
+    if ([self.blog supports:BlogFeatureWPComRESTAPI]) {
+        [sections addObject:@(SiteSettingsSectionDiscussion)];
+    }
+    
+    if ([self.blog supports:BlogFeatureRemovable]) {
+        [sections addObject:@(SiteSettingsSectionRemoveSite)];
+    }
+
+    self.tableSections = sections;
+    
+    [WPStyleGuide resetReadableMarginsForTableView:self.tableView];
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
     
     self.refreshControl = [[UIRefreshControl alloc] init];
@@ -132,7 +140,7 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     self.authToken = self.blog.authToken;
     self.username = self.blog.usernameForSite;
     self.password = self.blog.password;
-    self.geolocationEnabled = self.blog.geolocationEnabled;
+    self.geolocationEnabled = self.blog.settings.geolocationEnabled;
     
     [self refreshData];
 }
@@ -169,16 +177,28 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
             }
             return SiteSettingsGeneralCount - rowsToHide;
         }
-        break;
-        case SiteSettingsSectionAccount:
+        case SiteSettingsSectionAccount: {
             return SiteSettingsAccountCount;
-        break;
-        case SiteSettingsSectionWriting:
-            return SiteSettingsWritingCount;
-        break;
-        case SiteSettingsSectionRemoveSite:
+        }
+        case SiteSettingsSectionWriting: {
+            if (!self.blog.isAdmin) {
+                // If we're not admin, we just want to show the geotagging cell
+                return 1;
+            }
+            NSInteger rowsToHide = 0;
+            if (![self.blog supports:BlogFeatureWPComRESTAPI]) {
+                //  NOTE: Sergio Estevao (2015-09-23): Hides the related post for self-hosted sites not in jetpack
+                // because this options is not available for them.
+                rowsToHide += 1;
+            }
+            return SiteSettingsWritingCount - rowsToHide;
+        }
+        case SiteSettingsSectionDiscussion: {
             return 1;
-        break;
+        }
+        case SiteSettingsSectionRemoveSite: {
+            return 1;
+        }
     }
     return 0;
 }
@@ -230,18 +250,18 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     return nil;
 }
 
-- (SettingTableViewCell *)geotaggingCell
+- (SwitchTableViewCell *)geotaggingCell
 {
     if (_geotaggingCell) {
         return _geotaggingCell;
     }
-    _geotaggingCell = [[SettingTableViewCell alloc] initWithLabel:NSLocalizedString(@"Geotagging", @"Enables geotagging in blog settings (short label)")
-                                                         editable:NO
-                                                  reuseIdentifier:nil];
-    UISwitch *geotaggingSwitch = [[UISwitch alloc] init];
-    geotaggingSwitch.on = self.geolocationEnabled;
-    [geotaggingSwitch addTarget:self action:@selector(toggleGeolocation:) forControlEvents:UIControlEventValueChanged];
-    _geotaggingCell.accessoryView = geotaggingSwitch;
+    _geotaggingCell = [SwitchTableViewCell new];
+    _geotaggingCell.name = NSLocalizedString(@"Geotagging", @"Enables geotagging in blog settings (short label)");
+    _geotaggingCell.on = self.geolocationEnabled;
+    __weak SiteSettingsViewController *weakSelf = self;
+    _geotaggingCell.onChange = ^(BOOL value){
+        [weakSelf toggleGeolocation:value];
+    };
     return _geotaggingCell;
 }
 
@@ -251,8 +271,8 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
         return _defaultCategoryCell;
     }
     _defaultCategoryCell = [[SettingTableViewCell alloc] initWithLabel:NSLocalizedString(@"Default Category", @"Label for selecting the default category of a post")
-                                                           editable:YES
-                                                    reuseIdentifier:nil];
+                                                              editable:YES
+                                                       reuseIdentifier:nil];
     return _defaultCategoryCell;
 }
 
@@ -262,24 +282,56 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
         return _defaultPostFormatCell;
     }
     _defaultPostFormatCell = [[SettingTableViewCell alloc] initWithLabel:NSLocalizedString(@"Default Post Format", @"Label for selecting the default post format")
-                                                              editable:YES
-                                                       reuseIdentifier:nil];
+                                                                editable:YES
+                                                         reuseIdentifier:nil];
     return _defaultPostFormatCell;
 }
 
+- (SettingTableViewCell *)relatedPostsCell
+{
+    if (_relatedPostsCell){
+        return _relatedPostsCell;
+    }
+    _relatedPostsCell = [[SettingTableViewCell alloc] initWithLabel:NSLocalizedString(@"Related Posts", @"Label for selecting the related posts options")
+                                                           editable:YES
+                                                    reuseIdentifier:nil];
+    return _relatedPostsCell;
+}
+
+- (SettingTableViewCell *)discussionSettingsCell
+{
+    if (_discussionSettingsCell) {
+        return _discussionSettingsCell;
+    }
+    
+    _discussionSettingsCell = [[SettingTableViewCell alloc] initWithLabel:NSLocalizedString(@"Discussion", @"Label for selecting the Blog Discussion Settings section")
+                                                                 editable:YES
+                                                          reuseIdentifier:nil];
+    return _discussionSettingsCell;
+}
+
+- (UITableViewCell *)removeSiteCell
+{
+    if (_removeSiteCell) {
+        return _removeSiteCell;
+    }
+    _removeSiteCell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    [WPStyleGuide configureTableViewDestructiveActionCell:_removeSiteCell];
+    _removeSiteCell.textLabel.text = NSLocalizedString(@"Remove Site", @"Button to remove a site from the app");
+    
+    return _removeSiteCell;
+}
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForWritingSettingsAtRow:(NSInteger)row
 {
     switch (row) {
         case (SiteSettingsWritingGeotagging):{
-            UISwitch *geotaggingSwitch =  (UISwitch *)self.geotaggingCell.accessoryView;
-            geotaggingSwitch.on = self.geolocationEnabled;
             return self.geotaggingCell;
         }
         break;
         case (SiteSettingsWritingDefaultCategory):{
             PostCategoryService *postCategoryService = [[PostCategoryService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
-            PostCategory *postCategory = [postCategoryService findWithBlogObjectID:self.blog.objectID andCategoryID:self.blog.defaultCategoryID];
+            PostCategory *postCategory = [postCategoryService findWithBlogObjectID:self.blog.objectID andCategoryID:self.blog.settings.defaultCategoryID];
             [self.defaultCategoryCell setTextValue:[postCategory categoryName]];
             return self.defaultCategoryCell;
         }
@@ -287,6 +339,9 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
         case (SiteSettingsWritingDefaultPostFormat):{
             [self.defaultPostFormatCell setTextValue:self.blog.defaultPostFormatText];
             return self.defaultPostFormatCell;
+        }
+        case (SiteSettingsWritingRelatedPosts):{
+            return self.relatedPostsCell;
         }
         break;
 
@@ -342,19 +397,13 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
 {
     switch (row) {
         case SiteSettingsGeneralTitle: {
-            if (self.blog.blogName) {
-                [self.siteTitleCell setTextValue:self.blog.blogName];
-            } else {
-                [self.siteTitleCell setTextValue:NSLocalizedString(@"A title for the site", @"Placeholder text for the title of a site")];
-            }
+            NSString *name = self.blog.settings.name ?: NSLocalizedString(@"A title for the site", @"Placeholder text for the title of a site");
+            [self.siteTitleCell setTextValue:name];
             return self.siteTitleCell;
         } break;
         case SiteSettingsGeneralTagline: {
-            if (self.blog.blogTagline) {
-                [self.siteTaglineCell setTextValue:self.blog.blogTagline];
-            } else {
-                [self.siteTaglineCell setTextValue:NSLocalizedString(@"Explain what this site is about.", @"Placeholder text for the tagline of a site")];
-            }
+            NSString *tagline = self.blog.settings.tagline ?: NSLocalizedString(@"Explain what this site is about.", @"Placeholder text for the tagline of a site");
+            [self.siteTaglineCell setTextValue:tagline];
             return self.siteTaglineCell;
         } break;
         case SiteSettingsGeneralURL: {
@@ -378,28 +427,25 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
 {
     NSInteger settingsSection = [self.tableSections[indexPath.section] intValue];
     switch (settingsSection) {
-        case SiteSettingsSectionGeneral:{
+        case SiteSettingsSectionGeneral: {
             return [self tableView:tableView cellForGeneralSettingsInRow:indexPath.row];
-        }break;
+        }
         case SiteSettingsSectionAccount: {
             return [self tableView:tableView cellForAccountSettingsInRow:indexPath.row];
-        }break;
+        }
         case SiteSettingsSectionWriting: {
             return [self tableView:tableView cellForWritingSettingsAtRow:indexPath.row];
-        }break;
+        }
+        case SiteSettingsSectionDiscussion: {
+            return self.discussionSettingsCell;
+        }
         case SiteSettingsSectionRemoveSite: {
-            if (self.removeSiteCell) {
-                return self.removeSiteCell;
-            }
-            self.removeSiteCell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-            [WPStyleGuide configureTableViewDestructiveActionCell:self.removeSiteCell];
-            self.removeSiteCell.textLabel.text = NSLocalizedString(@"Remove Site", @"Button to remove a site from the app");
             return self.removeSiteCell;
-        }break;
+        }
     }
 
-    // We shouldn't reach this point, but return an empty cell just in case
-    return [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"NoCell"];
+    NSAssert(false, @"Missing section handler");
+    return nil;
 }
 
 #pragma mark - UITableViewDelegate
@@ -409,7 +455,7 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     NSInteger settingsSection = [self.tableSections[section] intValue];
     NSString *title = [self titleForHeaderInSection:settingsSection];
     if (title.length == 0) {
-        return [[UIView alloc] initWithFrame:CGRectZero];
+        return [UIView new];
     }
     
     WPTableViewSectionHeaderFooterView *header = [[WPTableViewSectionHeaderFooterView alloc] initWithReuseIdentifier:nil style:WPTableViewSectionStyleHeader];
@@ -456,7 +502,7 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     NSArray *hints = @[
                        NSLocalizedString(@"Your site is visible to everyone, and it may be indexed by search engines.",
                                          @"Hint for users when public privacy setting is set"),
-                       NSLocalizedString(@"Your site is visible to everyone, but asks to search engines to not index your site.",
+                       NSLocalizedString(@"Your site is visible to everyone, but asks search engines not to index your site.",
                                          @"Hint for users when hidden privacy setting is set"),
                        NSLocalizedString(@"Your site is only visible to you and users you approve.",
                                          @"Hint for users when private privacy setting is set"),
@@ -476,7 +522,7 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
                                       SettingsSelectionHintsKey          : hints
                                       };
     
-    PostSettingsSelectionViewController *vc = [[PostSettingsSelectionViewController alloc] initWithDictionary:settingsSelectionConfiguration];
+    SettingsSelectionViewController *vc = [[SettingsSelectionViewController alloc] initWithDictionary:settingsSelectionConfiguration];
     __weak __typeof__(self) weakSelf = self;
     vc.onItemSelected = ^(NSNumber *status) {
         // Check if the object passed is indeed an NSString, otherwise we don't want to try to set it as the post format
@@ -499,15 +545,15 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
             if (!self.blog.isAdmin) {
                 return;
             }
-            SettingsTextViewController *siteTitleViewController = [[SettingsTextViewController alloc] initWithText:self.blog.blogName
-                                                                                                 placeholder:NSLocalizedString(@"A title for the site", @"Placeholder text for the title of a site")
+            SettingsTextViewController *siteTitleViewController = [[SettingsTextViewController alloc] initWithText:self.blog.settings.name
+                                                                                                       placeholder:NSLocalizedString(@"A title for the site", @"Placeholder text for the title of a site")
                                                                                                               hint:@""
                                                                                                         isPassword:NO];
             siteTitleViewController.title = NSLocalizedString(@"Site Title", @"Title for screen that show site title editor");
             siteTitleViewController.onValueChanged = ^(NSString *value) {
                 self.siteTitleCell.detailTextLabel.text = value;
-                if (![value isEqualToString:self.blog.blogName]){
-                    self.blog.blogName = value;
+                if (![value isEqualToString:self.blog.settings.name]){
+                    self.blog.settings.name = value;
                     [self saveSettings];
                 }
             };
@@ -517,16 +563,16 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
             if (!self.blog.isAdmin) {
                 return;
             }
-            SettingsMultiTextViewController *siteTaglineViewController = [[SettingsMultiTextViewController alloc] initWithText:self.blog.blogTagline
-                                                                                                 placeholder:NSLocalizedString(@"Explain what this site is about.", @"Placeholder text for the tagline of a site")
-                                                                                                              hint:NSLocalizedString(@"In a few words, explain what this site is about.",@"Explain what is the purpose of the tagline")
-                                                                                                        isPassword:NO];
+            SettingsMultiTextViewController *siteTaglineViewController = [[SettingsMultiTextViewController alloc] initWithText:self.blog.settings.tagline
+                                                                                                                   placeholder:NSLocalizedString(@"Explain what this site is about.", @"Placeholder text for the tagline of a site")
+                                                                                                                          hint:NSLocalizedString(@"In a few words, explain what this site is about.",@"Explain what is the purpose of the tagline")
+                                                                                                                    isPassword:NO];
             siteTaglineViewController.title = NSLocalizedString(@"Tagline", @"Title for screen that show tagline editor");
             siteTaglineViewController.onValueChanged = ^(NSString *value) {
                 NSString *normalizedTagline = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
                 self.siteTaglineCell.detailTextLabel.text = normalizedTagline;
-                if (![normalizedTagline isEqualToString:self.blog.blogTagline]){
-                    self.blog.blogTagline = normalizedTagline;
+                if (![normalizedTagline isEqualToString:self.blog.settings.tagline]){
+                    self.blog.settings.tagline = normalizedTagline;
                     [self saveSettings];
                 }
             };
@@ -569,7 +615,7 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     if (titles.count == 0 || self.blog.defaultPostFormatText == nil) {
         return;
     }
-    NSString *currentDefaultPostFormat = self.blog.defaultPostFormat;
+    NSString *currentDefaultPostFormat = self.blog.settings.defaultPostFormat;
     if (!currentDefaultPostFormat) {
         currentDefaultPostFormat = formats[0];
     }
@@ -581,13 +627,13 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
                                       SettingsSelectionCurrentValueKey   : currentDefaultPostFormat
                                       };
     
-    PostSettingsSelectionViewController *vc = [[PostSettingsSelectionViewController alloc] initWithDictionary:postFormatsDict];
+    SettingsSelectionViewController *vc = [[SettingsSelectionViewController alloc] initWithDictionary:postFormatsDict];
     __weak __typeof__(self) weakSelf = self;
     vc.onItemSelected = ^(NSString *status) {
         // Check if the object passed is indeed an NSString, otherwise we don't want to try to set it as the post format
         if ([status isKindOfClass:[NSString class]]) {
-            if (weakSelf.blog.defaultPostFormat != status) {
-                weakSelf.blog.defaultPostFormat = status;
+            if (weakSelf.blog.settings.defaultPostFormat != status) {
+                weakSelf.blog.settings.defaultPostFormat = status;
                 [weakSelf saveSettings];
             }
         }
@@ -596,15 +642,19 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     [self.navigationController pushViewController:vc animated:YES];
 }
 
+- (void)showRelatedPostsSettings
+{
+    RelatedPostsSettingsViewController *relatedPostsViewController = [[RelatedPostsSettingsViewController alloc] initWithBlog:self.blog];
+    
+    [self.navigationController pushViewController:relatedPostsViewController animated:YES];
+}
+
 - (void)tableView:(UITableView *)tableView didSelectInWritingSectionRow:(NSInteger)row
 {
     switch (row) {
         case SiteSettingsWritingDefaultCategory:{
             PostCategoryService *postCategoryService = [[PostCategoryService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
-            NSNumber *defaultCategoryID = self.blog.defaultCategoryID;
-            if (!defaultCategoryID) {
-                defaultCategoryID = @(PostCategoryUncategorized);
-            }
+            NSNumber *defaultCategoryID = self.blog.settings.defaultCategoryID ?: @(PostCategoryUncategorized);
             PostCategory *postCategory = [postCategoryService findWithBlogObjectID:self.blog.objectID andCategoryID:defaultCategoryID];
             NSArray *currentSelection = @[];
             if (postCategory){
@@ -621,6 +671,10 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
             [self showPostFormatSelector];
         }
         break;
+        case SiteSettingsWritingRelatedPosts:{
+            [self showRelatedPostsSettings];
+        }
+        break;
 
     }
 }
@@ -629,18 +683,22 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
 {
     NSInteger settingsSection = [self.tableSections[indexPath.section] intValue];
     switch (settingsSection) {
-        case SiteSettingsSectionGeneral:
+        case SiteSettingsSectionGeneral: {
             [self tableView:tableView didSelectInGeneralSectionRow:indexPath.row];
-            break;
-        case SiteSettingsSectionAccount:
+        } break;
+        case SiteSettingsSectionAccount: {
             [self tableView:tableView didSelectInAccountSectionRow:indexPath.row];
-            break;
-        case SiteSettingsSectionWriting:
+        } break;
+        case SiteSettingsSectionWriting: {
             [self tableView:tableView didSelectInWritingSectionRow:indexPath.row];
-            break;
+        } break;
+        case SiteSettingsSectionDiscussion: {
+            [self showDiscussionSettingsForBlog:self.blog];
+        } break;
         case SiteSettingsSectionRemoveSite:{
+            [tableView deselectSelectedRowWithAnimation:YES];
             [self showRemoveSiteForBlog:self.blog];
-        }break;
+        } break;
     }
 }
 
@@ -653,32 +711,25 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
 
 - (void)refreshData
 {
-    BlogService *service = [[BlogService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
     __weak __typeof__(self) weakSelf = self;
+    NSManagedObjectContext *mainContext = [[ContextManager sharedInstance] mainContext];
+    BlogService *service = [[BlogService alloc] initWithManagedObjectContext:mainContext];
+
     [service syncSettingsForBlog:self.blog success:^{
-        __typeof__(self) strongSelf = weakSelf;
-        if (!strongSelf) {
-            return;
-        }
-        [strongSelf.refreshControl endRefreshing];
-        [strongSelf.tableView reloadData];
+        [weakSelf.refreshControl endRefreshing];
+        [weakSelf.tableView reloadData];
     } failure:^(NSError *error) {
-        __typeof__(self) strongSelf = weakSelf;
-        if (!strongSelf) {
-            return;
-        }
-        [strongSelf.refreshControl endRefreshing];
+        [weakSelf.refreshControl endRefreshing];
     }];
     
 }
 
-- (void)toggleGeolocation:(id)sender
+- (void)toggleGeolocation:(BOOL)value
 {
-    UISwitch *geolocationSwitch = (UISwitch *)sender;
-    self.geolocationEnabled = geolocationSwitch.on;
+    self.geolocationEnabled = value;
 
     // Save the change
-    self.blog.geolocationEnabled = self.geolocationEnabled;
+    self.blog.settings.geolocationEnabled = self.geolocationEnabled;
     [[ContextManager sharedInstance] saveContext:self.blog.managedObjectContext];
 }
 
@@ -746,7 +797,7 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
             [WPError showAlertWithTitle:NSLocalizedString(@"Sorry, can't log in", @"")
                                 message:message
                       withSupportButton:YES
-                         okPressedBlock:^(UIAlertView *alertView) {
+                         okPressedBlock:^(UIAlertController *alertView) {
                 [self openSiteAdminFromAlert:alertView];
             }];
 
@@ -756,7 +807,7 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     }
 }
 
-- (void)openSiteAdminFromAlert:(UIAlertView *)alertView
+- (void)openSiteAdminFromAlert:(UIAlertController *)alertView
 {
     NSString *path = nil;
     NSError *error = nil;
@@ -788,13 +839,15 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
 
 - (void)saveSettings
 {
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:self.blog.managedObjectContext];
-    if ([self.blog hasChanges]) {
-        [blogService updateSettingForBlog:self.blog success:^{
-        } failure:^(NSError *error) {
-            [SVProgressHUD showErrorWithStatus:NSLocalizedString(@"Settings update failed", @"Message to show when setting save failed")];
-        }];
+    if (!self.blog.settings.hasChanges) {
+        return;
     }
+    
+    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:self.blog.managedObjectContext];
+    [blogService updateSettingsForBlog:self.blog success:nil failure:^(NSError *error) {
+        [SVProgressHUD showErrorWithStatus:NSLocalizedString(@"Settings update failed", @"Message to show when setting save failed")];
+        DDLogError(@"Error while trying to update BlogSettings: %@", error);
+    }];
 }
 
 - (IBAction)cancel:(id)sender
@@ -812,74 +865,60 @@ UIAlertViewDelegate, UIActionSheetDelegate, PostCategoriesViewControllerDelegate
     }
 }
 
-- (BOOL)canEditUsernameAndURL
+
+
+#pragma mark - Discussion
+
+- (void)showDiscussionSettingsForBlog:(Blog *)blog
 {
-    return NO;
+    NSParameterAssert(blog);
+    
+    DiscussionSettingsViewController *settings = [[DiscussionSettingsViewController alloc] initWithBlog:blog];
+    [self.navigationController pushViewController:settings animated:YES];
 }
+
 
 #pragma mark - Remove Site
 
 - (void)showRemoveSiteForBlog:(Blog *)blog
 {
+    NSParameterAssert(blog);
+    
     NSString *model = [[UIDevice currentDevice] localizedModel];
-    NSString *title = [NSString stringWithFormat:NSLocalizedString(@"Are you sure you want to continue?\n All site data will be removed from your %@.", @"Title for the remove site confirmation alert, %@ will be replaced with iPhone/iPad/iPod Touch"), model];
+    NSString *message = [NSString stringWithFormat:NSLocalizedString(@"Are you sure you want to continue?\n All site data will be removed from your %@.", @"Title for the remove site confirmation alert, %@ will be replaced with iPhone/iPad/iPod Touch"), model];
     NSString *cancelTitle = NSLocalizedString(@"Cancel", nil);
     NSString *destructiveTitle = NSLocalizedString(@"Remove Site", @"Button to remove a site from the app");
-    if (IS_IPAD) {
-        UIAlertView *alert = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Remove Site", @"Remove site confirmation alert title")
-                                                        message:title
-                                                       delegate:self
-                                              cancelButtonTitle:cancelTitle
-                                              otherButtonTitles:destructiveTitle, nil];
-        alert.tag = SiteSettinsAlertTagSiteRemoval;
-        [alert show];
-    } else {
-        UIActionSheet *actionSheet = [[UIActionSheet alloc] initWithTitle:title
-                                                                 delegate:self
-                                                        cancelButtonTitle:cancelTitle
-                                                   destructiveButtonTitle:destructiveTitle
-                                                        otherButtonTitles:nil];
-        actionSheet.tag = SiteSettinsAlertTagSiteRemoval;
-        [actionSheet showInView:self.view];
-    }
+    
+    UIAlertControllerStyle alertStyle = [UIDevice isPad] ? UIAlertControllerStyleAlert : UIAlertControllerStyleActionSheet;
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:nil
+                                                                             message:message
+                                                                      preferredStyle:alertStyle];
+    
+    [alertController addCancelActionWithTitle:cancelTitle handler:nil];
+    [alertController addDestructiveActionWithTitle:destructiveTitle handler:^(UIAlertAction *action) {
+        [self confirmRemoveSite:blog];
+    }];
+    
+    [self presentViewController:alertController animated:YES completion:nil];
 }
 
-- (void)confirmRemoveSite
+- (void)confirmRemoveSite:(Blog *)blog
 {
+    NSParameterAssert(blog);
+    
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    [blogService removeBlog:self.blog];
+    [blogService removeBlog:blog];
     [self.navigationController popToRootViewControllerAnimated:YES];
 }
 
-#pragma mark - Action sheet delegate
-
-- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex
-{
-    if (actionSheet.tag == SiteSettinsAlertTagSiteRemoval) {
-        if (buttonIndex == actionSheet.destructiveButtonIndex) {
-            [self confirmRemoveSite];
-        }
-    }
-}
-
-#pragma mark - Alert view delegate
-
-- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
-{
-    if (alertView.tag == SiteSettinsAlertTagSiteRemoval) {
-        if (buttonIndex == alertView.firstOtherButtonIndex) {
-            [self confirmRemoveSite];
-        }
-    }
-}
 
 #pragma mark - PostCategoriesViewControllerDelegate
 
 - (void)postCategoriesViewController:(PostCategoriesViewController *)controller
                    didSelectCategory:(PostCategory *)category
 {
-    self.blog.defaultCategoryID = category.categoryID;
+    self.blog.settings.defaultCategoryID = category.categoryID;
     self.defaultCategoryCell.detailTextLabel.text = category.categoryName;
     [self saveSettings];
 }

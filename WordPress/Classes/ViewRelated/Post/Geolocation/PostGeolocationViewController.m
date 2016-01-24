@@ -8,6 +8,7 @@
 #import "PostAnnotation.h"
 #import "PostGeolocationView.h"
 #import "WPTableViewCell.h"
+#import "WordPress-Swift.h"
 
 @interface PostGeolocationViewController () <MKMapViewDelegate>
 
@@ -83,8 +84,8 @@
         return;
     }
 
-    self.deleteButton = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"icon-comments-trash"] style:UIBarButtonItemStylePlain target:self action:@selector(removeGeolocation)];
-    self.refreshButton = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"sync_lite"] style:UIBarButtonItemStylePlain target:self action:@selector(updateLocation)];
+    self.deleteButton = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"gridicons-trash"] style:UIBarButtonItemStylePlain target:self action:@selector(removeGeolocation)];
+    self.refreshButton = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"gridicons-sync"] style:UIBarButtonItemStylePlain target:self action:@selector(updateLocation)];
 
     self.deleteButton.tintColor = [WPStyleGuide readGrey];
     self.refreshButton.tintColor = [WPStyleGuide readGrey];
@@ -109,7 +110,7 @@
         return;
     }
 
-    if (![self.post.blog geolocationEnabled]) {
+    if (!self.post.blog.settings.geolocationEnabled) {
         [WPError showAlertWithTitle:NSLocalizedString(@"Enable Geotagging", @"Title of an alert view stating the user needs to turn on geotagging.")
                             message:NSLocalizedString(@"Geotagging is turned off. \nTo update this post's location, please enable geotagging in this site's settings.", @"Message of an alert explaining that geotagging need to be enabled.")
                   withSupportButton:NO];

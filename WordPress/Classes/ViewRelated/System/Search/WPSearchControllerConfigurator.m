@@ -3,8 +3,7 @@
 
 const CGFloat SearchBarWidth = 280.0;
 const CGFloat SearchBariPadWidth = 600.0;
-const CGFloat SearchWrapperViewPortraitHeight = 64.0;
-const CGFloat SearchWrapperViewLandscapeHeight = 44.0;
+const CGFloat SearchWrapperViewMinHeight = 44.0;
 const NSTimeInterval SearchBarAnimationDuration = 0.2; // seconds
 
 @interface WPSearchControllerConfigurator ()
@@ -69,7 +68,7 @@ const NSTimeInterval SearchBarAnimationDuration = 0.2; // seconds
         self.searchBar.returnKeyType = UIReturnKeyDone;
     }
     
-    [self.searchBar setImage:[UIImage imageNamed:@"icon-clear-textfield"] forSearchBarIcon:UISearchBarIconClear state:UIControlStateNormal];
+    [self.searchBar setImage:[UIImage imageNamed:@"icon-clear-searchfield"] forSearchBarIcon:UISearchBarIconClear state:UIControlStateNormal];
     [self.searchBar setImage:[UIImage imageNamed:@"icon-post-list-search"] forSearchBarIcon:UISearchBarIconSearch state:UIControlStateNormal];
     
     [self configureSearchBarForSearchView];

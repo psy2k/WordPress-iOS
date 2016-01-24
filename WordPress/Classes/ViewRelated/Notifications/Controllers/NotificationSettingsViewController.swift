@@ -1,5 +1,6 @@
 import Foundation
-
+import WordPressShared.WPStyleGuide
+import WordPressComAnalytics
 
 /**
 *  @class           NotificationSettingsViewController
@@ -50,8 +51,10 @@ public class NotificationSettingsViewController : UIViewController
         
         // Style!
         WPStyleGuide.configureColorsForView(view, andTableView: tableView)
+
+        tableView.cellLayoutMarginsFollowReadableWidth = false
     }
-    
+
     
     
     // MARK: - Service Helpers
@@ -74,7 +77,7 @@ public class NotificationSettingsViewController : UIViewController
         // Find the Default Blog ID
         let service         = AccountService(managedObjectContext: ContextManager.sharedInstance().mainContext)
         let defaultAccount  = service.defaultWordPressComAccount()
-        let primaryBlogId   = defaultAccount?.defaultBlog?.blogID as? Int
+        let primaryBlogId   = defaultAccount?.defaultBlog?.dotComID as? Int
         
         // Proceed Grouping
         var blogSettings    = [NotificationSettings]()
@@ -108,21 +111,23 @@ public class NotificationSettingsViewController : UIViewController
     
     // MARK: - Error Handling
     private func handleLoadError() {
-        UIAlertView.showWithTitle(NSLocalizedString("Oops!", comment: ""),
-            message             : NSLocalizedString("There has been a problem while loading your Notification Settings",
-                                                    comment: "Displayed after Notification Settings failed to load"),
-            style               : .Default,
-            cancelButtonTitle   : NSLocalizedString("Cancel", comment: "Cancel. Action."),
-            otherButtonTitles   : [ NSLocalizedString("Try Again", comment: "Try Again. Action") ],
-            tapBlock            : { (alertView: UIAlertView!, buttonIndex: Int) -> Void in
-                // On Cancel: Let's dismiss this screen
-                if alertView.cancelButtonIndex == buttonIndex {
-                    self.navigationController?.popViewControllerAnimated(true)
-                    return
-                }
-                
-                self.reloadSettings()
-            })
+        let title       = NSLocalizedString("Oops!", comment: "")
+        let message     = NSLocalizedString("There has been a problem while loading your Notification Settings",
+                                            comment: "Displayed after Notification Settings failed to load")
+        let cancelText  = NSLocalizedString("Cancel", comment: "Cancel. Action.")
+        let retryText   = NSLocalizedString("Try Again", comment: "Try Again. Action")
+        
+        let alertController = UIAlertController(title: title, message: message, preferredStyle: .Alert)
+        
+        alertController.addCancelActionWithTitle(cancelText) { (action: UIAlertAction) in
+            self.navigationController?.popViewControllerAnimated(true)
+        }
+        
+        alertController.addDefaultActionWithTitle(retryText) { (action: UIAlertAction) in
+            self.reloadSettings()
+        }
+        
+        presentViewController(alertController, animated: true, completion: nil)
     }
     
     
@@ -246,7 +251,7 @@ public class NotificationSettingsViewController : UIViewController
         let settings = settingsForRowAtIndexPath(indexPath)!
         switch settings.channel {
         case .Blog(_):
-            cell.textLabel?.text            = settings.blog?.blogName ?? settings.channel.description()
+            cell.textLabel?.text            = settings.blog?.settings?.name ?? settings.channel.description()
             cell.detailTextLabel?.text      = settings.blog?.displayURL ?? String()
             cell.accessoryType              = .DisclosureIndicator
             

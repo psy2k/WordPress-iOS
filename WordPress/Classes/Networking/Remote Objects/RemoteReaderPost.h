@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 @class RemoteSourcePostAttribution;
+@class RemoteReaderCrossPostMeta;
 
 @interface RemoteReaderPost : NSObject
 
@@ -9,12 +10,15 @@
 @property (nonatomic, strong) NSString *authorDisplayName;
 @property (nonatomic, strong) NSString *authorEmail;
 @property (nonatomic, strong) NSString *authorURL;
+@property (nonatomic, strong) NSString *siteIconURL;
 @property (nonatomic, strong) NSString *blogName;
 @property (nonatomic, strong) NSString *blogDescription;
 @property (nonatomic, strong) NSString *blogURL;
 @property (nonatomic, strong) NSNumber *commentCount;
 @property (nonatomic) BOOL commentsOpen;
 @property (nonatomic, strong) NSString *featuredImage;
+@property (nonatomic, strong) NSNumber *feedID;
+@property (nonatomic, strong) NSNumber *feedItemID;
 @property (nonatomic, strong) NSString *globalID;
 @property (nonatomic) BOOL isBlogPrivate;
 @property (nonatomic) BOOL isFollowing;
@@ -29,6 +33,7 @@
 @property (nonatomic) BOOL isLikesEnabled;
 @property (nonatomic) BOOL isSharingEnabled;
 @property (nonatomic, strong) RemoteSourcePostAttribution *sourceAttribution;
+@property (nonatomic, strong) RemoteReaderCrossPostMeta *crossPostMeta;
 
 @property (nonatomic, strong) NSString *primaryTag;
 @property (nonatomic, strong) NSString *primaryTagSlug;
@@ -47,5 +52,6 @@
 @property (nonatomic, strong) NSNumber *postID;
 @property (nonatomic, strong) NSString *postTitle;
 @property (nonatomic, strong) NSString *status;
+
 
 @end

@@ -9,6 +9,7 @@
 #import "WordPressComApi.h"
 #import "WPAccount.h"
 #import "WPAvatarSource.h"
+#import "WordPress-Swift.h"
 
 // These keys are used in the getStoredComment method
 NSString * const ReaderPostStoredCommentIDKey = @"commentID";
@@ -19,12 +20,15 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 @dynamic authorDisplayName;
 @dynamic authorEmail;
 @dynamic authorURL;
+@dynamic siteIconURL;
 @dynamic blogName;
 @dynamic blogDescription;
 @dynamic blogURL;
 @dynamic commentCount;
 @dynamic commentsOpen;
 @dynamic featuredImage;
+@dynamic feedID;
+@dynamic feedItemID;
 @dynamic isBlogPrivate;
 @dynamic isFollowing;
 @dynamic isLiked;
@@ -45,13 +49,17 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 
 @dynamic primaryTag;
 @dynamic primaryTagSlug;
-@dynamic secondaryTag;
-@dynamic secondaryTagSlug;
 @dynamic isExternal;
 @dynamic isJetpack;
 @dynamic wordCount;
 @dynamic readingTime;
+@dynamic crossPostMeta;
 
+
+- (BOOL)isCrossPost
+{
+    return self.crossPostMeta != nil;
+}
 
 - (BOOL)isPrivate
 {
@@ -140,13 +148,25 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 
 - (NSString *)blogNameForDisplay
 {
-    return self.blogName;
+    if (self.blogName.length > 0) {
+        return self.blogName;
+    }
+    return [[NSURL URLWithString:self.blogURL] host];
 }
 
-- (NSURL *)blavatarForDisplayOfSize:(NSInteger)size
+- (NSURL *)siteIconForDisplayOfSize:(NSInteger)size
 {
-    NSString *hash = [[[NSURL URLWithString:self.blogURL] host] md5];
-    NSString *str = [NSString stringWithFormat:@"http://gravatar.com/blavatar/%@/?s=%d&d=404", hash, size];
+    NSString *str;
+    if ([self.siteIconURL length] > 0) {
+        if ([self.siteIconURL rangeOfString:@"/blavatar/"].location == NSNotFound) {
+            str = self.siteIconURL;
+        } else {
+            str = [NSString stringWithFormat:@"%@?s=%d&d=404", self.siteIconURL, size];
+        }
+    } else {
+        NSString *hash = [[[NSURL URLWithString:self.blogURL] host] md5];
+        str = [NSString stringWithFormat:@"https://secure.gravatar.com/blavatar/%@/?s=%d&d=404", hash, size];
+    }
     return [NSURL URLWithString:str];
 }
 
@@ -187,7 +207,7 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
     NSInteger count = [self.likeCount integerValue];
     NSString *title;
     if (count == 0) {
-        title = likesStr;
+        title = likeStr;
     } else if (count == 1) {
         title = [NSString stringWithFormat:@"%d %@", count, likeStr];
     } else {
@@ -246,5 +266,26 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 {
     return (self.sourceAttribution.blogID) ? YES : NO;
 }
+
+- (NSURL *)avatarURLForDisplay
+{
+    return [NSURL URLWithString:self.authorAvatarURL];
+}
+
+- (NSString *)siteURLForDisplay
+{
+    return self.blogURL;
+}
+
+- (NSString *)crossPostOriginSiteURLForDisplay
+{
+    return self.crossPostMeta.siteURL;
+}
+
+- (BOOL)isCommentCrossPost
+{
+    return self.crossPostMeta.commentURL.length > 0;
+}
+
 
 @end

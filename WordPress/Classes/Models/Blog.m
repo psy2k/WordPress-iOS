@@ -8,7 +8,9 @@
 #import "ContextManager.h"
 #import "Constants.h"
 #import "BlogSiteVisibilityHelper.h"
-#import <SFHFKeychainUtils.h>
+#import "WordPress-Swift.h"
+#import "SFHFKeychainUtils.h"
+#import <WordPressApi/WordPressApi.h>
 
 static NSInteger const ImageSizeSmallWidth = 240;
 static NSInteger const ImageSizeSmallHeight = 180;
@@ -23,15 +25,12 @@ NSString * const PostFormatStandard = @"standard";
 
 @property (nonatomic, strong, readwrite) WPXMLRPCClient *api;
 @property (nonatomic, strong, readwrite) JetpackState *jetpack;
-@property (nonatomic, strong, readwrite) NSNumber *privacy;
 
 @end
 
 @implementation Blog
 
 @dynamic blogID;
-@dynamic blogName;
-@dynamic blogTagline;
 @dynamic url;
 @dynamic xmlrpc;
 @dynamic apiKey;
@@ -39,16 +38,19 @@ NSString * const PostFormatStandard = @"standard";
 @dynamic hasOlderPages;
 @dynamic posts;
 @dynamic categories;
+@dynamic tags;
 @dynamic comments;
+@dynamic connections;
 @dynamic themes;
 @dynamic media;
+@dynamic menus;
+@dynamic menuLocations;
 @dynamic currentThemeId;
 @dynamic lastPostsSync;
 @dynamic lastStatsSync;
 @dynamic lastPagesSync;
 @dynamic lastCommentsSync;
 @dynamic lastUpdateWarning;
-@dynamic geolocationEnabled;
 @dynamic options;
 @dynamic postFormats;
 @dynamic isActivated;
@@ -60,9 +62,8 @@ NSString * const PostFormatStandard = @"standard";
 @dynamic isHostedAtWPcom;
 @dynamic icon;
 @dynamic username;
-@dynamic defaultCategoryID;
-@dynamic defaultPostFormat;
-@dynamic privacy;
+@dynamic settings;
+
 
 @synthesize api = _api;
 @synthesize isSyncingPosts;
@@ -91,25 +92,6 @@ NSString * const PostFormatStandard = @"standard";
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
-#pragma mark -
-
-- (BOOL)geolocationEnabled
-{
-    BOOL tmpValue;
-
-    [self willAccessValueForKey:@"geolocationEnabled"];
-    tmpValue = [[self primitiveValueForKey:@"geolocationEnabled"] boolValue];
-    [self didAccessValueForKey:@"geolocationEnabled"];
-
-    return tmpValue;
-}
-
-- (void)setGeolocationEnabled:(BOOL)value
-{
-    [self willChangeValueForKey:@"geolocationEnabled"];
-    [self setPrimitiveValue:[NSNumber numberWithBool:value] forKey:@"geolocationEnabled"];
-    [self didChangeValueForKey:@"geolocationEnabled"];
-}
 
 #pragma mark -
 #pragma mark Custom methods
@@ -272,7 +254,7 @@ NSString * const PostFormatStandard = @"standard";
 
 - (NSString *)defaultPostFormatText
 {
-    return [self postFormatTextFromSlug:self.defaultPostFormat];
+    return [self postFormatTextFromSlug:self.settings.defaultPostFormat];
 }
 
 - (NSString *)postFormatTextFromSlug:(NSString *)postFormatSlug
@@ -292,12 +274,12 @@ NSString * const PostFormatStandard = @"standard";
 // WP.COM private blog.
 - (BOOL)isPrivate
 {
-    return (self.isHostedAtWPcom && [self.privacy isEqualToNumber:@(SiteVisibilityPrivate)]);
+    return (self.isHostedAtWPcom && [self.settings.privacy isEqualToNumber:@(SiteVisibilityPrivate)]);
 }
 
 - (SiteVisibility)siteVisibility
 {
-    switch ([self.privacy integerValue]) {
+    switch ([self.settings.privacy integerValue]) {
         case (SiteVisibilityHidden):
             return SiteVisibilityHidden;
             break;
@@ -317,13 +299,13 @@ NSString * const PostFormatStandard = @"standard";
 {
     switch (siteVisibility) {
         case (SiteVisibilityHidden):
-            self.privacy = @(SiteVisibilityHidden);
+            self.settings.privacy = @(SiteVisibilityHidden);
             break;
         case (SiteVisibilityPublic):
-            self.privacy = @(SiteVisibilityPublic);
+            self.settings.privacy = @(SiteVisibilityPublic);
             break;
         case (SiteVisibilityPrivate):
-            self.privacy = @(SiteVisibilityPrivate);
+            self.settings.privacy = @(SiteVisibilityPrivate);
             break;
         default:
             NSParameterAssert(siteVisibility >= SiteVisibilityPrivate && siteVisibility <= SiteVisibilityPublic);
@@ -333,10 +315,10 @@ NSString * const PostFormatStandard = @"standard";
 
 - (NSString *)textForCurrentSiteVisibility
 {
-    if (!self.privacy) {
+    if (!self.settings.privacy) {
         [BlogSiteVisibilityHelper textForSiteVisibility:SiteVisibilityUnknown];
     }
-    return [BlogSiteVisibilityHelper textForSiteVisibility:[self.privacy integerValue]];
+    return [BlogSiteVisibilityHelper textForSiteVisibility:[self.settings.privacy intValue]];
 }
 
 
@@ -367,24 +349,6 @@ NSString * const PostFormatStandard = @"standard";
 
     // Reset the api client so next time we use the new XML-RPC URL
     self.api = nil;
-}
-
-- (NSArray *)getXMLRPCArgsWithExtra:(id)extra
-{
-    NSMutableArray *result = [NSMutableArray array];
-    NSString *password = self.password ?: [NSString string];
-    
-    [result addObject:self.blogID];
-    [result addObject:self.usernameForSite];
-    [result addObject:password];
-
-    if ([extra isKindOfClass:[NSArray class]]) {
-        [result addObjectsFromArray:extra];
-    } else if (extra != nil) {
-        [result addObject:extra];
-    }
-
-    return [NSArray arrayWithArray:result];
 }
 
 - (NSString *)version
@@ -467,6 +431,8 @@ NSString * const PostFormatStandard = @"standard";
             return [self isHostedAtWPcom];
         case BlogFeaturePushNotifications:
             return [self supportsPushNotifications];
+        case BlogFeatureThemeBrowsing:
+            return [self isHostedAtWPcom] && [self isAdmin];
     }
 }
 
@@ -491,21 +457,23 @@ NSString * const PostFormatStandard = @"standard";
 
 - (NSNumber *)dotComID
 {
-    /*
-     mergeBlogs isn't atomic so there might be a small window for Jetpack sites
-     where self.account is the WordPress.com account, but self.blogID still has
-     the self hosted ID.
-     
-     Even if the blog is using Jetpack REST, self.jetpack.siteID should still
-     have the correct wp.com blog ID, so let's try that one first
-     */
-    if (self.jetpack.siteID) {
-        return self.jetpack.siteID;
-    } else if (self.account) {
-        return self.blogID;
-    } else {
-        return nil;
+    [self willAccessValueForKey:@"blogID"];
+    NSNumber *dotComID = [self primitiveValueForKey:@"blogID"];
+    if (dotComID.integerValue == 0) {
+        dotComID = self.jetpack.siteID;
+        if (dotComID.integerValue > 0) {
+            self.dotComID = dotComID;
+        }
     }
+    [self didAccessValueForKey:@"blogID"];
+    return dotComID;
+}
+
+- (void)setDotComID:(NSNumber *)dotComID
+{
+    [self willChangeValueForKey:@"blogID"];
+    [self setPrimitiveValue:dotComID forKey:@"blogID"];
+    [self didChangeValueForKey:@"blogID"];
 }
 
 - (NSSet *)allowedFileTypes
@@ -536,13 +504,13 @@ NSString * const PostFormatStandard = @"standard";
 {
     NSString *extra = @"";
     if (self.account) {
-        extra = [NSString stringWithFormat:@" wp.com account: %@ blogId: %@", self.account ? self.account.username : @"NO", self.blogID];
+        extra = [NSString stringWithFormat:@" wp.com account: %@ blogId: %@", self.account ? self.account.username : @"NO", self.dotComID];
     } else if (self.jetpackAccount) {
         extra = [NSString stringWithFormat:@" jetpack: 🚀🚀 Jetpack %@ fully connected as %@ with site ID %@", self.jetpack.version, self.jetpackAccount.username, self.jetpack.siteID];
     } else {
         extra = [NSString stringWithFormat:@" jetpack: %@", [self.jetpack description]];
     }
-    return [NSString stringWithFormat:@"<Blog Name: %@ URL: %@ XML-RPC: %@%@>", self.blogName, self.url, self.xmlrpc, extra];
+    return [NSString stringWithFormat:@"<Blog Name: %@ URL: %@ XML-RPC: %@%@>", self.settings.name, self.url, self.xmlrpc, extra];
 }
 
 #pragma mark - api accessor

@@ -2,20 +2,21 @@
 #import "Blog.h"
 #import "WordPressAppDelegate.h"
 #import "JetpackSettingsViewController.h"
-#import "StatsWebViewController.h"
-#import "WPChromelessWebViewController.h"
 #import "WPAccount.h"
 #import "ContextManager.h"
 #import "BlogService.h"
 #import "SettingsViewController.h"
 #import "SFHFKeychainUtils.h"
 #import "TodayExtensionService.h"
-#import <WPStatsViewController.h>
-#import <WPNoResultsView.h>
+#import <WordPressComStatsiOS/WPStatsViewController.h>
+#import <WordPressShared/WPNoResultsView.h>
+#import "WordPress-Swift.h"
+#import "WPAppAnalytics.h"
+#import "WPWebViewController.h"
 
 static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
 
-@interface StatsViewController () <UIActionSheetDelegate, WPStatsViewControllerDelegate>
+@interface StatsViewController () <WPStatsViewControllerDelegate>
 
 @property (nonatomic, assign) BOOL showingJetpackLogin;
 @property (nonatomic, strong) UINavigationController *statsNavVC;
@@ -41,8 +42,9 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
     [super viewDidLoad];
  
     self.view.backgroundColor = [WPStyleGuide itsEverywhereGrey];
-    
-    NSString *path = [[NSBundle mainBundle] pathForResource:@"WordPressCom-Stats-iOS" ofType:@"bundle"];
+
+    NSBundle *statsBundle = [NSBundle bundleForClass:[WPStatsViewController class]];
+    NSString *path = [statsBundle pathForResource:@"WordPressCom-Stats-iOS" ofType:@"bundle"];
     NSBundle *bundle = [NSBundle bundleWithPath:path];
     self.statsNavVC = [[UIStoryboard storyboardWithName:@"SiteStats" bundle:bundle] instantiateInitialViewController];
     self.statsVC = self.statsNavVC.viewControllers.firstObject;
@@ -54,7 +56,7 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
     if (self.presentingViewController != nil) {
         UIBarButtonItem *doneButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(doneButtonTapped:)];
         self.navigationItem.rightBarButtonItem = doneButton;
-        self.title = self.blog.blogName;
+        self.title = self.blog.settings.name;
     }
 
     [self initStats];
@@ -118,7 +120,7 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
 {
     TodayExtensionService *service = [TodayExtensionService new];
     [service configureTodayWidgetWithSiteID:self.statsVC.siteID
-                                   blogName:self.blog.blogName
+                                   blogName:self.blog.settings.name
                                siteTimeZone:self.statsVC.siteTimeZone
                              andOAuth2Token:self.statsVC.oauth2Token];
 }
@@ -135,8 +137,10 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
     __weak JetpackSettingsViewController *safeController = controller;
     [controller setCompletionBlock:^(BOOL didAuthenticate) {
         if (didAuthenticate) {
-            [WPAnalytics track:WPAnalyticsStatSignedInToJetpack];
-            [WPAnalytics track:WPAnalyticsStatPerformedJetpackSignInFromStatsScreen];
+            
+            [WPAppAnalytics track:WPAnalyticsStatSignedInToJetpack withBlog:self.blog];
+            [WPAppAnalytics track:WPAnalyticsStatPerformedJetpackSignInFromStatsScreen withBlog:self.blog];
+
             [safeController.view removeFromSuperview];
             [safeController removeFromParentViewController];
             self.showingJetpackLogin = NO;
@@ -150,34 +154,28 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
 }
 
 
-- (void)statsViewController:(WPStatsViewController *)statsViewController didSelectViewWebStatsForSiteID:(NSNumber *)siteID
-{
-    StatsWebViewController *vc = [[StatsWebViewController alloc] init];
-    vc.blog = self.blog;
-    [self.navigationController pushViewController:vc animated:YES];
-}
-
-
 - (void)statsViewController:(WPStatsViewController *)controller openURL:(NSURL *)url
 {
-    WPChromelessWebViewController *vc = [[WPChromelessWebViewController alloc] init];
-    [vc loadPath:url.absoluteString];
-    [self.navigationController pushViewController:vc animated:YES];
+    WPWebViewController *webVC = [WPWebViewController authenticatedWebViewController:url];
+    [self.navigationController pushViewController:webVC animated:YES];
 }
 
 
 - (IBAction)makeSiteTodayWidgetSite:(id)sender
 {
-    UIActionSheet *actionSheet = [[UIActionSheet alloc] initWithTitle:NSLocalizedString(@"You can display a single site's stats in the iOS Today/Notification Center view.", @"Action sheet title for setting Today Widget site to the current one")
-                                                             delegate:self
-                                                    cancelButtonTitle:NSLocalizedString(@"Cancel", @"")
-                                               destructiveButtonTitle:nil
-                                                    otherButtonTitles:NSLocalizedString(@"Use this site", @""), nil];
-    if (IS_IPAD) {
-        [actionSheet showFromBarButtonItem:sender animated:YES];
-    } else {
-        [actionSheet showFromTabBar:self.tabBarController.tabBar];
-    }
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"You can display a single site's stats in the iOS Today/Notification Center view.", @"Action sheet title for setting Today Widget site to the current one")
+                                                                             message:nil
+                                                                      preferredStyle:UIAlertControllerStyleActionSheet];
+    [alertController addActionWithTitle:NSLocalizedString(@"Cancel", @"")
+                                  style:UIAlertActionStyleCancel
+                                handler:nil];
+    [alertController addActionWithTitle:NSLocalizedString(@"Use this site", @"")
+                                  style:UIAlertActionStyleDefault
+                                handler:^(UIAlertAction *alertAction) {
+                                   [self saveSiteDetailsForTodayWidget];
+                                  }];
+    alertController.popoverPresentationController.barButtonItem = sender;
+    [self presentViewController:alertController animated:YES completion:nil];
 }
 
 
@@ -195,17 +193,6 @@ static NSString *const StatsBlogObjectURLRestorationKey = @"StatsBlogObjectURL";
     WPNoResultsView *noResultsView = [WPNoResultsView noResultsViewWithTitle:title message:message accessoryView:nil buttonTitle:nil];
     self.noResultsView = noResultsView;
     [self.view addSubview:self.noResultsView];
-}
-
-
-#pragma mark - UIActionSheetDelegate methods
-
-
-- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex
-{
-    if (buttonIndex == 0) {
-        [self saveSiteDetailsForTodayWidget];
-    }
 }
 
 #pragma mark - Restoration

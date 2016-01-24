@@ -10,7 +10,8 @@
 #import "WPLegacyEditPostViewController.h"
 #import "WPPostViewController.h"
 #import "WPTableImageSource.h"
-#import <WordPress-iOS-Shared/UIImage+Util.h>
+#import <WordPressShared/UIImage+Util.h>
+#import "WPAppAnalytics.h"
 
 static NSString * const PostCardTextCellIdentifier = @"PostCardTextCellIdentifier";
 static NSString * const PostCardImageCellIdentifier = @"PostCardImageCellIdentifier";
@@ -102,6 +103,17 @@ static const CGFloat PostListHeightForFooterView = 34.0;
     self.title = NSLocalizedString(@"Posts", @"Tile of the screen showing the list of posts for a blog.");
 }
 
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
+{
+    [super traitCollectionDidChange:previousTraitCollection];
+
+    [self forceUpdateCellLayout:self.textCellForLayout];
+    [self forceUpdateCellLayout:self.imageCellForLayout];
+
+    [self.tableViewHandler clearCachedRowHeights];
+    [self.tableView reloadRowsAtIndexPaths:[self.tableView indexPathsForVisibleRows] withRowAnimation:UITableViewRowAnimationNone];
+}
+
 
 #pragma mark - Configuration
 
@@ -124,8 +136,6 @@ static const CGFloat PostListHeightForFooterView = 34.0;
     // Force a layout pass to ensure that constrants are configured for the
     // proper size class.
     [self.view addSubview:cell];
-    [cell updateConstraintsIfNeeded];
-    [cell layoutIfNeeded];
     [cell removeFromSuperview];
 }
 
@@ -384,8 +394,8 @@ static const CGFloat PostListHeightForFooterView = 34.0;
     postCell.delegate = self;
     Post *post = (Post *)[self.tableViewHandler.resultsController objectAtIndexPath:indexPath];
 
-    BOOL loadImages = !([cell isEqual:self.imageCellForLayout] || [cell isEqual:self.textCellForLayout]);
-    [postCell configureCell:post loadingImages:loadImages];
+    BOOL layoutOnly = ([cell isEqual:self.imageCellForLayout] || [cell isEqual:self.textCellForLayout]);
+    [postCell configureCell:post layoutOnly:layoutOnly];
 }
 
 - (NSString *)cellIdentifierForPost:(Post *)post
@@ -426,8 +436,8 @@ static const CGFloat PostListHeightForFooterView = 34.0;
     navController.modalPresentationStyle = UIModalPresentationFullScreen;
 
     [self presentViewController:navController animated:YES completion:nil];
-
-    [WPAnalytics track:WPAnalyticsStatEditorCreatedPost withProperties:@{ @"tap_source": @"posts_view" }];
+    
+    [WPAppAnalytics track:WPAnalyticsStatEditorCreatedPost withProperties:@{@"tap_source": @"posts_view"} withBlog:self.blog];
 }
 
 - (void)previewEditPost:(AbstractPost *)apost
@@ -473,12 +483,11 @@ static const CGFloat PostListHeightForFooterView = 34.0;
         default:
             break;
     }
-    UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:nil
-                                                        message:message
-                                                       delegate:nil
-                                              cancelButtonTitle:NSLocalizedString(@"OK", @"Title of an OK button. Pressing the button acknowledges and dismisses a prompt.")
-                                              otherButtonTitles:nil, nil];
-    [alertView show];
+    NSString *alertCancel = NSLocalizedString(@"OK", @"Title of an OK button. Pressing the button acknowledges and dismisses a prompt.");
+
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:nil message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alertController addCancelActionWithTitle:alertCancel handler:nil];
+    [alertController presentFromRootViewController];
 }
 
 - (void)viewStatsForPost:(AbstractPost *)apost
@@ -495,8 +504,10 @@ static const CGFloat PostListHeightForFooterView = 34.0;
     // Push the Stats Post Details ViewController
     NSString *identifier = NSStringFromClass([StatsPostDetailsTableViewController class]);
     BlogService *service = [[BlogService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
-    NSString *path = [[NSBundle mainBundle] pathForResource:@"WordPressCom-Stats-iOS" ofType:@"bundle"];
-    UIStoryboard *statsStoryboard   = [UIStoryboard storyboardWithName:StatsStoryboardName bundle:[NSBundle bundleWithPath:path]];
+    NSBundle *statsBundle = [NSBundle bundleForClass:[WPStatsViewController class]];
+    NSString *path = [statsBundle pathForResource:@"WordPressCom-Stats-iOS" ofType:@"bundle"];
+    NSBundle *bundle = [NSBundle bundleWithPath:path];
+    UIStoryboard *statsStoryboard   = [UIStoryboard storyboardWithName:StatsStoryboardName bundle:bundle];
     StatsPostDetailsTableViewController *controller = [statsStoryboard instantiateViewControllerWithIdentifier:identifier];
     NSAssert(controller, @"Couldn't instantiate StatsPostDetailsTableViewController");
 

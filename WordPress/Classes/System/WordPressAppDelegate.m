@@ -6,18 +6,14 @@
 // Pods
 #import <AFNetworking/UIKit+AFNetworking.h>
 #import <Crashlytics/Crashlytics.h>
-#import <GooglePlus/GooglePlus.h>
 #import <HockeySDK/HockeySDK.h>
 #import <Reachability/Reachability.h>
 #import <Simperium/Simperium.h>
 #import <SVProgressHUD/SVProgressHUD.h>
 #import <UIDeviceIdentifier/UIDeviceHardware.h>
 #import <WordPressApi/WordPressApi.h>
-#import <WordPress-AppbotX/ABX.h>
-#import <WordPress-iOS-Shared/UIImage+Util.h>
-
-// Other third party libs
-#import "PocketAPI.h"
+#import <WordPress_AppbotX/ABX.h>
+#import <WordPressShared/UIImage+Util.h>
 
 // Analytics & crash logging
 #import "WPAppAnalytics.h"
@@ -27,7 +23,6 @@
 #import "NSBundle+VersionNumberHelper.h"
 #import "NSProcessInfo+Util.h"
 #import "NSString+Helpers.h"
-#import "UIAlertView+Blocks.h"
 #import "UIDevice+Helpers.h"
 
 // Data model
@@ -47,8 +42,6 @@
 #import "WPLookbackPresenter.h"
 #import "TodayExtensionService.h"
 #import "WPAuthTokenIssueSolver.h"
-#import "WPWhatsNew.h"
-#import "WPThemeSettings.h"
 
 // Networking
 #import "WPUserAgent.h"
@@ -71,7 +64,6 @@
 #import <WPMediaPicker/WPMediaPicker.h>
 
 int ddLogLevel                                                  = DDLogLevelInfo;
-static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhatsNewPopup";
 
 @interface WordPressAppDelegate () <UITabBarControllerDelegate, UIAlertViewDelegate, BITHockeyManagerDelegate>
 
@@ -85,13 +77,7 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 @property (nonatomic, assign, readwrite) BOOL                           connectionAvailable;
 @property (nonatomic, strong, readwrite) WPUserAgent                    *userAgent;
 @property (nonatomic, assign, readwrite) BOOL                           shouldRestoreApplicationState;
-
-/**
- *  @brief      Flag that signals wether Whats New is on screen or not.
- *  @details    Won't be necessary once WPWhatsNew is changed to inherit from UIViewController
- *              https://github.com/wordpress-mobile/WordPress-iOS/issues/3218
- */
-@property (nonatomic, assign, readwrite) BOOL                           wasWhatsNewShown;
+@property (nonatomic, assign) UIApplicationShortcutItem                 *launchedShortcutItem;
 
 @end
 
@@ -117,9 +103,6 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     [self setupReachability];
     
     // Set the main window up
-    CGRect bounds = [[UIScreen mainScreen] bounds];
-    [self.window setFrame:bounds];
-    [self.window setBounds:bounds];
     [self.window makeKeyAndVisible];
     
     // Simperium: Wire CoreData Stack
@@ -144,11 +127,6 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
     DDLogVerbose(@"didFinishLaunchingWithOptions state: %d", application.applicationState);
-
-    // Launched by tapping a notification
-    if (application.applicationState == UIApplicationStateActive) {
-        [NotificationsManager handleNotificationForApplicationLaunch:launchOptions];
-    }
 
     [self.window makeKeyAndVisible];
     [self showWelcomeScreenIfNeededAnimated:NO];
@@ -199,14 +177,6 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     if ([[BITHockeyManager sharedHockeyManager].authenticator handleOpenURL:url
                                                           sourceApplication:sourceApplication
                                                                  annotation:annotation]) {
-        returnValue = YES;
-    }
-
-    if ([[GPPShare sharedInstance] handleURL:url sourceApplication:sourceApplication annotation:annotation]) {
-        returnValue = YES;
-    }
-
-    if ([[PocketAPI sharedAPI] handleOpenURL:url]) {
         returnValue = YES;
     }
 
@@ -276,16 +246,6 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
                     }
                 }
             }
-        } else if ([WPThemeSettings shouldHandleURL:url]) {
-            returnValue = [WPThemeSettings handleURL:url];
-            
-            if (returnValue) {
-                if ([WPThemeSettings isEnabled]) {
-                    [SVProgressHUD showSuccessWithStatus:@"Themes enabled."];
-                } else {
-                    [SVProgressHUD showSuccessWithStatus:@"Themes disabled."];
-                }
-            }
         }
     }
 
@@ -351,7 +311,11 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 {
     DDLogInfo(@"%@ %@", self, NSStringFromSelector(_cmd));
     
-    [self showWhatsNewIfNeeded];
+    if (self.launchedShortcutItem) {
+        WP3DTouchShortcutHandler *shortcutHandler = [[WP3DTouchShortcutHandler alloc] init];
+        [shortcutHandler handleShortcutItem:self.launchedShortcutItem];
+        self.launchedShortcutItem = nil;
+    }
 }
 
 - (BOOL)application:(UIApplication *)application shouldSaveApplicationState:(NSCoder *)coder
@@ -362,6 +326,12 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 - (BOOL)application:(UIApplication *)application shouldRestoreApplicationState:(NSCoder *)coder
 {
     return self.shouldRestoreApplicationState;
+}
+
+- (void)application: (UIApplication *)application performActionForShortcutItem:(nonnull UIApplicationShortcutItem *)shortcutItem completionHandler:(nonnull void (^)(BOOL))completionHandler
+{
+    WP3DTouchShortcutHandler *shortcutHandler = [[WP3DTouchShortcutHandler alloc] init];
+    completionHandler([shortcutHandler handleShortcutItem:shortcutItem]);
 }
 
 #pragma mark - Application startup
@@ -390,11 +360,10 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     
     [HelpshiftUtils setup];
     
-    [[GPPSignIn sharedInstance] setClientID:[WordPressComApiCredentials googlePlusClientId]];
-    
     // Networking setup
     [[AFNetworkActivityIndicatorManager sharedManager] setEnabled:YES];
     self.userAgent = [[WPUserAgent alloc] init];
+    [self.userAgent useWordPressUserAgentInUIWebViews];
     [self setupSingleSignOn];
 
     // WORKAROUND: Preload the Merriweather regular font to ensure it is not overridden
@@ -404,22 +373,20 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     [WPFontManager merriweatherRegularFontOfSize:16.0];
 
     [self customizeAppearance];
-    
-    // Push notifications
-    [NotificationsManager registerForPushNotifications];
+
+    // Notifications
+    [[PushNotificationsManager sharedInstance] registerForRemoteNotifications];
+    [[InteractiveNotificationsHandler sharedInstance] registerForUserNotifications];
     
     // Deferred tasks to speed up app launch
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
         [MediaService cleanUnusedMediaFileFromTmpDir];
-        [[PocketAPI sharedAPI] setConsumerKey:[WordPressComApiCredentials pocketConsumerKey]];
     });
     
     // Configure Today Widget
     [self determineIfTodayWidgetIsConfiguredAndShowAppropriately];
     
-    if ([WPPostViewController makeNewEditorAvailable]) {
-        [self setMustShowWhatsNewPopup:YES];
-    }
+    [WPPostViewController makeNewEditorAvailable];
     
     self.window.rootViewController = [WPTabBarController sharedInstance];
 }
@@ -428,12 +395,12 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 
 - (void)application:(UIApplication *)application didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken
 {
-    [NotificationsManager registerDeviceToken:deviceToken];
+    [[PushNotificationsManager sharedInstance] registerDeviceToken:deviceToken];
 }
 
 - (void)application:(UIApplication *)application didFailToRegisterForRemoteNotificationsWithError:(NSError *)error
 {
-    [NotificationsManager registrationDidFail:error];
+    [[PushNotificationsManager sharedInstance] registrationDidFail:error];
 }
 
 - (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo
@@ -454,7 +421,7 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
                                         forRemoteNotification:(NSDictionary *)remoteNotification
                                             completionHandler:(void (^)())completionHandler
 {
-    [NotificationsManager handleActionWithIdentifier:identifier forRemoteNotification:remoteNotification];
+    [[InteractiveNotificationsHandler sharedInstance] handleActionWithIdentifier:identifier remoteNotification:remoteNotification];
     
     completionHandler();
 }
@@ -523,6 +490,11 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 
 #pragma mark - Custom methods
 
+- (BOOL)isLoggedIn
+{
+    return !([self noSelfHostedBlogs] && [self noWordPressDotComAccount]);
+}
+
 - (void)showWelcomeScreenIfNeededAnimated:(BOOL)animated
 {
     if (self.isWelcomeScreenVisible || !([self noSelfHostedBlogs] && [self noWordPressDotComAccount])) {
@@ -555,7 +527,6 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
         __strong __typeof(weakSelf) strongSelf = self;
         
         [strongSelf.window.rootViewController dismissViewControllerAnimated:YES completion:nil];
-        [strongSelf showWhatsNewIfNeeded];
     };
 
     UINavigationController *navigationController = [[RotationAwareNavigationViewController alloc] initWithRootViewController:loginViewController];
@@ -602,8 +573,8 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     [[UINavigationBar appearance] setBarTintColor:[WPStyleGuide wordPressBlue]];
     [[UINavigationBar appearance] setTintColor:[UIColor whiteColor]];
 
-    [[UINavigationBar appearanceWhenContainedIn:[MFMailComposeViewController class], nil] setBarTintColor:[UIColor whiteColor]];
-    [[UINavigationBar appearanceWhenContainedIn:[MFMailComposeViewController class], nil] setTintColor:defaultTintColor];
+    [[UINavigationBar appearanceWhenContainedInInstancesOfClasses:@[ [MFMailComposeViewController class] ]] setBarTintColor:[UIColor whiteColor]];
+    [[UINavigationBar appearanceWhenContainedInInstancesOfClasses:@[ [MFMailComposeViewController class] ]] setTintColor:defaultTintColor];
 
     [[UITabBar appearance] setShadowImage:[UIImage imageWithColor:[UIColor colorWithRed:210.0/255.0 green:222.0/255.0 blue:230.0/255.0 alpha:1.0]]];
     [[UITabBar appearance] setTintColor:[WPStyleGuide newKidOnTheBlockBlue]];
@@ -624,13 +595,13 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     [[UITabBarItem appearance] setTitleTextAttributes:@{NSFontAttributeName: [WPFontManager openSansRegularFontOfSize:10.0], NSForegroundColorAttributeName: [WPStyleGuide allTAllShadeGrey]} forState:UIControlStateNormal];
     [[UITabBarItem appearance] setTitleTextAttributes:@{NSForegroundColorAttributeName: [WPStyleGuide wordPressBlue]} forState:UIControlStateSelected];
 
-    [[UINavigationBar appearanceWhenContainedIn:[UIReferenceLibraryViewController class], nil] setBackgroundImage:nil forBarMetrics:UIBarMetricsDefault];
-    [[UINavigationBar appearanceWhenContainedIn:[UIReferenceLibraryViewController class], nil] setBarTintColor:[WPStyleGuide wordPressBlue]];
-    [[UIToolbar appearanceWhenContainedIn:[UIReferenceLibraryViewController class], nil] setBarTintColor:[UIColor darkGrayColor]];
+    [[UINavigationBar appearanceWhenContainedInInstancesOfClasses:@[ [UIReferenceLibraryViewController class] ]] setBackgroundImage:nil forBarMetrics:UIBarMetricsDefault];
+    [[UINavigationBar appearanceWhenContainedInInstancesOfClasses:@[ [UIReferenceLibraryViewController class] ]] setBarTintColor:[WPStyleGuide wordPressBlue]];
+    [[UIToolbar appearanceWhenContainedInInstancesOfClasses:@[ [UIReferenceLibraryViewController class] ]] setBarTintColor:[UIColor darkGrayColor]];
     
-    [[UIToolbar appearanceWhenContainedIn:[WPEditorViewController class], nil] setBarTintColor:[UIColor whiteColor]];
+    [[UIToolbar appearanceWhenContainedInInstancesOfClasses:@[ [WPEditorViewController class] ]] setBarTintColor:[UIColor whiteColor]];
 
-    [[UITextField appearanceWhenContainedIn:[UISearchBar class], nil] setDefaultTextAttributes:[WPStyleGuide defaultSearchBarTextAttributes:[WPStyleGuide littleEddieGrey]]];
+    [[UITextField appearanceWhenContainedInInstancesOfClasses:@[ [UISearchBar class] ]] setDefaultTextAttributes:[WPStyleGuide defaultSearchBarTextAttributes:[WPStyleGuide littleEddieGrey]]];
     
     // SVProgressHUD styles    
     [SVProgressHUD setBackgroundColor:[[WPStyleGuide littleEddieGrey] colorWithAlphaComponent:0.95]];
@@ -640,11 +611,17 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     [SVProgressHUD setSuccessImage:[UIImage imageNamed:@"hud_success"]];
     
     // Media Picker styles
-    UIBarButtonItem *barButtonItem = [UIBarButtonItem appearanceWhenContainedIn:[WPMediaPickerViewController class], nil];
+    UIBarButtonItem *barButtonItem = [UIBarButtonItem appearanceWhenContainedInInstancesOfClasses:@[ [WPMediaPickerViewController class] ]];
     [barButtonItem setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName : [WPFontManager openSansSemiBoldFontOfSize:16.0]} forState:UIControlStateNormal];
     [barButtonItem setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName : [WPFontManager openSansSemiBoldFontOfSize:16.0]} forState:UIControlStateDisabled];
-    [[UICollectionView appearanceWhenContainedIn:[WPMediaPickerViewController class],nil] setBackgroundColor:[WPStyleGuide greyLighten30]];
-    [[WPMediaCollectionViewCell appearanceWhenContainedIn:[WPMediaCollectionViewController class],nil] setBackgroundColor:[WPStyleGuide lightGrey]];
+    [[UICollectionView appearanceWhenContainedInInstancesOfClasses:@[ [WPMediaPickerViewController class] ]] setBackgroundColor:[WPStyleGuide greyLighten30]];
+    [[WPMediaCollectionViewCell appearanceWhenContainedInInstancesOfClasses:@[ [WPMediaCollectionViewController class] ]] setBackgroundColor:[WPStyleGuide lightGrey]];
+}
+
+- (void)create3DTouchShortcutItems
+{
+    WP3DTouchShortcutCreator *shortcutCreator = [WP3DTouchShortcutCreator new];
+    [shortcutCreator createShortcuts:[self isLoggedIn]];
 }
 
 #pragma mark - Analytics
@@ -661,12 +638,7 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
 #pragma mark - App Rating
 
 - (void)initializeAppRatingUtility
-{
-    // Dont start App Tracking if we are running the test suite
-    if ([NSProcessInfo isRunningTests]) {
-        return;
-    }
-    
+{    
     NSString *version = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
     [AppRatingUtility registerSection:@"notifications" withSignificantEventCount:5];
     [AppRatingUtility setSystemWideSignificantEventsCount:10];
@@ -750,6 +722,7 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     
     self.connectionAvailable = [self.internetReachability isReachable];
 }
+
 
 #pragma mark - Simperium
 
@@ -887,7 +860,7 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     DDLogInfo(@"OS:        %@ %@", device.systemName, device.systemVersion);
     DDLogInfo(@"Language:  %@", currentLanguage);
     DDLogInfo(@"UDID:      %@", device.wordPressIdentifier);
-    DDLogInfo(@"APN token: %@", [NotificationsManager registeredPushNotificationsToken]);
+    DDLogInfo(@"APN token: %@", [[PushNotificationsManager sharedInstance] deviceToken]);
     DDLogInfo(@"Launch options: %@", launchOptions);
     
     if (blogs.count > 0) {
@@ -972,7 +945,6 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     // If the notification object is not nil, then it's a login
     if (notification.object) {
         [self loginSimperium];
-
     } else {
         if ([self noSelfHostedBlogs] && [self noWordPressDotComAccount]) {
             [WPAnalytics track:WPAnalyticsStatLogout];
@@ -988,6 +960,7 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
         [self showWelcomeScreenIfNeededAnimated:NO];
     }
     
+    [self create3DTouchShortcutItems];
     [self toggleExtraDebuggingIfNeeded];
     [self setupSingleSignOn];
     
@@ -1029,53 +1002,10 @@ static NSString * const MustShowWhatsNewPopup                   = @"MustShowWhat
     [self.simperium saveWithoutSyncing];
 }
 
-#pragma mark - What's new
-
-/**
- *  @brief      Shows the What's New popup if needed.
- *  @details    Takes care of saving the user defaults that signal that What's New was already
- *              shown.  Also adds a slight delay before showing anything.  Also does nothing if
- *              the user is not logged in.
- */
-- (void)showWhatsNewIfNeeded
+- (BOOL)testSuiteIsRunning
 {
-    if (!self.wasWhatsNewShown) {
-        BOOL userIsLoggedIn = !([self noSelfHostedBlogs] && [self noWordPressDotComAccount]);
-        
-        if (userIsLoggedIn) {
-            if ([self mustShowWhatsNewPopup]) {
-                
-                static NSString* const WhatsNewUserDefaultsKey = @"WhatsNewUserDefaultsKey";
-                static const CGFloat WhatsNewShowDelay = 1.0f;
-                
-                NSUserDefaults* userDefaults = [NSUserDefaults standardUserDefaults];
-                
-                BOOL whatsNewAlreadyShown = [userDefaults boolForKey:WhatsNewUserDefaultsKey];
-                
-                if (!whatsNewAlreadyShown) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(WhatsNewShowDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        self.wasWhatsNewShown = YES;
-                        
-                        WPWhatsNew* whatsNew = [[WPWhatsNew alloc] init];
-                        
-                        [whatsNew showWithDismissBlock:^{
-                            [userDefaults setBool:YES forKey:WhatsNewUserDefaultsKey];
-                        }];
-                    });
-                }
-            }
-        }
-    }
-}
-
-- (BOOL)mustShowWhatsNewPopup
-{
-    return [[NSUserDefaults standardUserDefaults] boolForKey:MustShowWhatsNewPopup];
-}
-
-- (void)setMustShowWhatsNewPopup:(BOOL)mustShow
-{
-    [[NSUserDefaults standardUserDefaults] setBool:mustShow forKey:MustShowWhatsNewPopup];
+    Class testSuite = NSClassFromString(@"XCTestCase");
+    return testSuite != nil;
 }
 
 @end

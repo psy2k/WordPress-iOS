@@ -1,10 +1,13 @@
 #import "ReaderPostServiceRemote.h"
-#import "WordPressComApi.h"
+
 #import "DateUtils.h"
-#import "RemoteReaderPost.h"
 #import "DisplayableImageHelper.h"
-#import "ReaderTopicServiceRemote.h"
+#import "RemoteReaderPost.h"
 #import "RemoteSourcePostAttribution.h"
+#import "ReaderTopicServiceRemote.h"
+#import "WordPressComApi.h"
+#import <WordPressShared/NSString+XMLExtensions.h>
+#import "WordPress-Swift.h"
 
 // REST Post dictionary keys
 NSString * const PostRESTKeyAttachments = @"attachments";
@@ -22,6 +25,8 @@ NSString * const PostRESTKeyEmail = @"email";
 NSString * const PostRESTKeyExcerpt = @"excerpt";
 NSString * const PostRESTKeyFeaturedMedia = @"featured_media";
 NSString * const PostRESTKeyFeaturedImage = @"featured_image";
+NSString * const PostRESTKeyFeedID = @"feed_ID";
+NSString * const PostRESTKeyFeedItemID = @"feed_item_ID";
 NSString * const PostRESTKeyGlobalID = @"global_ID";
 NSString * const PostRESTKeyHighlightTopic = @"highlight_topic";
 NSString * const PostRESTKeyHighlightTopicTitle = @"highlight_topic_title";
@@ -55,36 +60,19 @@ NSString * const TagKeyPrimarySlug = @"primaryTagSlug";
 NSString * const TagKeySecondary = @"secondaryTag";
 NSString * const TagKeySecondarySlug = @"secondaryTagSlug";
 
+// XPost Meta Keys
+NSString * const PostRESTKeyMetadata = @"metadata";
+NSString * const CrossPostMetaKey = @"key";
+NSString * const CrossPostMetaValue = @"value";
+NSString * const CrossPostMetaXPostPermalink = @"_xpost_original_permalink";
+NSString * const CrossPostMetaXCommentPermalink = @"xcomment_original_permalink";
+NSString * const CrossPostMetaXPostOrigin = @"xpost_origin";
+NSString * const CrossPostMetaCommentPrefix = @"comment-";
+
 static const NSInteger AvgWordsPerMinuteRead = 250;
 static const NSInteger MinutesToReadThreshold = 2;
 
 @implementation ReaderPostServiceRemote
-
-- (void)fetchPostsFromEndpoint:(NSURL *)endpoint
-                         count:(NSUInteger)count
-                       success:(void (^)(NSArray *posts))success
-                       failure:(void (^)(NSError *error))failure
-{
-    NSNumber *numberToFetch = @(count);
-    NSDictionary *params = @{@"number":numberToFetch};
-
-    [self fetchPostsFromEndpoint:endpoint withParameters:params success:success failure:failure];
-}
-
-- (void)fetchPostsFromEndpoint:(NSURL *)endpoint
-                         count:(NSUInteger)count
-                         after:(NSDate *)date
-                       success:(void (^)(NSArray *posts))success
-                       failure:(void (^)(NSError *error))failure
-{
-    NSNumber *numberToFetch = @(count);
-    NSDictionary *params = @{@"number":numberToFetch,
-                             @"after": [DateUtils isoStringFromDate:date],
-                             @"order": @"ASC"
-                             };
-
-    [self fetchPostsFromEndpoint:endpoint withParameters:params success:success failure:failure];
-}
 
 - (void)fetchPostsFromEndpoint:(NSURL *)endpoint
                          count:(NSUInteger)count
@@ -168,80 +156,6 @@ static const NSInteger MinutesToReadThreshold = 2;
     }];
 }
 
-- (void)followSite:(NSUInteger)siteID
-           success:(void (^)())success
-           failure:(void(^)(NSError *error))failure
-{
-    NSString *path = [NSString stringWithFormat:@"sites/%d/follows/new", siteID];
-    NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
-    
-    [self.api POST:requestUrl parameters:nil success:^(AFHTTPRequestOperation *operation, id responseObject) {
-        if (success) {
-            success();
-        }
-    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-        if (failure) {
-            failure(error);
-        }
-    }];
-}
-
-- (void)unfollowSite:(NSUInteger)siteID success:(void (^)())success failure:(void(^)(NSError *error))failure
-{
-    NSString *path = [NSString stringWithFormat:@"sites/%d/follows/mine/delete", siteID];
-    NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
-    
-    [self.api POST:requestUrl parameters:nil success:^(AFHTTPRequestOperation *operation, id responseObject) {
-        if (success) {
-            success();
-        }
-    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-        if (failure) {
-            failure(error);
-        }
-    }];
-}
-
-- (void)followSiteAtURL:(NSString *)siteURL success:(void (^)())success failure:(void(^)(NSError *error))failure
-{
-    NSString *path = @"read/following/mine/new";
-    NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
-    
-    NSDictionary *params = @{@"url": siteURL};
-    
-    [self.api POST:requestUrl parameters:params success:^(AFHTTPRequestOperation *operation, id responseObject) {
-        if (success) {
-            success();
-        }
-    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-        if (failure) {
-            failure(error);
-        }
-    }];
-}
-
-- (void)unfollowSiteAtURL:(NSString *)siteURL success:(void (^)())success failure:(void(^)(NSError *error))failure
-{
-    NSString *path = @"read/following/mine/delete";
-    NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
-    
-    NSDictionary *params = @{@"url": siteURL};
-    
-    [self.api POST:requestUrl parameters:params success:^(AFHTTPRequestOperation *operation, id responseObject) {
-        if (success) {
-            success();
-        }
-    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-        if (failure) {
-            failure(error);
-        }
-    }];
-}
-
 
 #pragma mark - Private Methods
 
@@ -297,6 +211,7 @@ static const NSInteger MinutesToReadThreshold = 2;
     post.authorDisplayName = [self stringOrEmptyString:[authorDict stringForKey:PostRESTKeyName]]; // Typically the author's given name
     post.authorEmail = [self authorEmailFromAuthorDictionary:authorDict];
     post.authorURL = [self stringOrEmptyString:[authorDict stringForKey:PostRESTKeyURL]];
+    post.siteIconURL = [self stringOrEmptyString:[dict stringForKeyPath:@"meta.data.site.icon.img"]];
     post.blogName = [self siteNameFromPostDictionary:dict];
     post.blogDescription = [self siteDescriptionFromPostDictionary:dict];
     post.blogURL = [self siteURLFromPostDictionary:dict];
@@ -305,6 +220,8 @@ static const NSInteger MinutesToReadThreshold = 2;
     post.content = [self stringOrEmptyString:[dict stringForKey:PostRESTKeyContent]];
     post.date_created_gmt = [self stringOrEmptyString:[dict stringForKey:PostRESTKeyDate]];
     post.featuredImage = [self featuredImageFromPostDictionary:dict];
+    post.feedID = [dict numberForKey:PostRESTKeyFeedID];
+    post.feedItemID = [dict numberForKey:PostRESTKeyFeedItemID];
     post.globalID = [self stringOrEmptyString:[dict stringForKey:PostRESTKeyGlobalID]];
     post.isBlogPrivate = [self siteIsPrivateFromPostDictionary:dict];
     post.isFollowing = [[dict numberForKey:PostRESTKeyIsFollowing] boolValue];
@@ -339,7 +256,52 @@ static const NSInteger MinutesToReadThreshold = 2;
     if ([dict arrayForKeyPath:@"discover_metadata.discover_fp_post_formats"]) {
         post.sourceAttribution = [self sourceAttributionFromDictionary:[dict dictionaryForKey:PostRESTKeyDiscoverMetadata]];
     }
+
+    RemoteReaderCrossPostMeta *crossPostMeta = [self crossPostMetaFromPostDictionary:dict];
+    if (crossPostMeta) {
+        post.crossPostMeta = crossPostMeta;
+    }
+
     return post;
+}
+
+- (RemoteReaderCrossPostMeta *)crossPostMetaFromPostDictionary:(NSDictionary *)dict
+{
+    BOOL crossPostMetaFound = NO;
+
+    RemoteReaderCrossPostMeta *meta = [RemoteReaderCrossPostMeta new];
+
+    NSArray *metadata = [dict arrayForKey:PostRESTKeyMetadata];
+    for (NSDictionary *obj in metadata) {
+        if ([[obj stringForKey:CrossPostMetaKey] isEqualToString:CrossPostMetaXPostPermalink] ||
+            [[obj stringForKey:CrossPostMetaKey] isEqualToString:CrossPostMetaXCommentPermalink]) {
+
+            NSString *path = [obj stringForKey:CrossPostMetaValue];
+            NSURL *url = [NSURL URLWithString:path];
+            if (!url) {
+                NSLog(@"break");
+            }
+
+            meta.siteURL = [NSString stringWithFormat:@"%@://%@", url.scheme, url.host];
+            meta.postURL = [NSString stringWithFormat:@"%@/%@", meta.siteURL, url.path];
+            if ([url.fragment hasPrefix:CrossPostMetaCommentPrefix]) {
+                meta.commentURL = [url absoluteString];
+            }
+        } else if ([[obj stringForKey:CrossPostMetaKey] isEqualToString:CrossPostMetaXPostOrigin]) {
+            NSString *value = [obj stringForKey:CrossPostMetaValue];
+            NSArray *IDS = [value componentsSeparatedByString:@":"];
+            meta.siteID = [[IDS firstObject] numericValue];
+            meta.postID = [[IDS lastObject] numericValue];
+
+            crossPostMetaFound = YES;
+        }
+    }
+
+    if (!crossPostMetaFound) {
+        return nil;
+    }
+
+    return meta;
 }
 
 - (NSDictionary *)primaryAndSecondaryTagsFromPostDictionary:(NSDictionary *)dict
@@ -390,6 +352,9 @@ static const NSInteger MinutesToReadThreshold = 2;
         primaryTag = editorialTag;
         primaryTagSlug = editorialSlug;
     }
+
+    primaryTag = [primaryTag stringByDecodingXMLCharacters];
+    secondaryTag = [secondaryTag stringByDecodingXMLCharacters];
 
     return @{
              TagKeyPrimary:primaryTag,
@@ -504,8 +469,8 @@ static const NSInteger MinutesToReadThreshold = 2;
         img = [img substringWithRange:NSMakeRange(location, length)];
 
         // Actually decode twice to remove the encodings
-        img = [img stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-        img = [img stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        img = [img stringByRemovingPercentEncoding];
+        img = [img stringByRemovingPercentEncoding];
     }
     return img;
 }
@@ -595,11 +560,10 @@ static const NSInteger MinutesToReadThreshold = 2;
  */
 - (NSString *)featuredImageFromPostDictionary:(NSDictionary *)dict
 {
-    NSString *featuredImage = [NSString string];
     NSDictionary *featured_media = [dict dictionaryForKey:PostRESTKeyFeaturedMedia];
 
     // Editorial trumps all
-    featuredImage = [dict stringForKeyPath:@"editorial.image"];
+    NSString *featuredImage = [dict stringForKeyPath:@"editorial.image"];
 
     // User specified featured image.
     if ([featuredImage length] == 0) {

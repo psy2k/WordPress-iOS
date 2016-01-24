@@ -1,6 +1,4 @@
-#import <Simperium/SPManagedObject.h>
-
-
+#import <Simperium/Simperium.h>
 
 @class NotificationBlock;
 @class NotificationBlockGroup;
@@ -29,6 +27,15 @@ extern NSString * NoteRangeTypeSite;
 extern NSString * NoteRangeTypeMatch;
 
 extern NSString * NoteMediaTypeImage;
+
+extern NSString * NoteTypeUser;
+extern NSString * NoteTypeComment;
+extern NSString * NoteTypeMatcher;
+extern NSString * NoteTypePost;
+extern NSString * NoteTypeFollow;
+extern NSString * NoteTypeLike;
+extern NSString * NoteTypeCommentLike;
+
 
 typedef NS_ENUM(NSInteger, NoteBlockType)
 {

@@ -1,5 +1,5 @@
 #import "WPStyleGuide+Posts.h"
-#import <WordPress-iOS-Shared/WPFontManager.h>
+#import <WordPressShared/WPFontManager.h>
 #import "WordPress-Swift.h"
 #import <QuartzCore/QuartzCore.h>
 
@@ -94,9 +94,7 @@
     button.titleLabel.font = [WPStyleGuide subtitleFont];
     [button setTitleColor:[WPStyleGuide wordPressBlue] forState:UIControlStateNormal];
     [button setTitleColor:[WPStyleGuide darkBlue] forState:UIControlStateHighlighted];
-    button.imageEdgeInsets = UIEdgeInsetsMake(0.0, 0.0, 0.0, 3.0);
 }
-
 
 #pragma mark - Attributed String Attributes
 
@@ -122,8 +120,8 @@
 
 + (NSDictionary *)postCardTitleAttributes
 {
-    CGFloat fontSize = [UIDevice isPad] ? 24.0 : 16.0;
-    CGFloat lineHeight = [UIDevice isPad] ? 32.0 : 21.0;
+    CGFloat fontSize = [UIDevice isPad] ? 24.0 : 18.0;
+    CGFloat lineHeight = [UIDevice isPad] ? 32.0 : 24.0;
     NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
     paragraphStyle.minimumLineHeight = lineHeight;
     paragraphStyle.maximumLineHeight = lineHeight;
@@ -133,7 +131,7 @@
 + (NSDictionary *)postCardSnippetAttributes
 {
     CGFloat fontSize = [UIDevice isPad] ? 16.0 : 14.0;
-    CGFloat lineHeight = [UIDevice isPad] ? 24.0 : 21.0;
+    CGFloat lineHeight = [UIDevice isPad] ? 26.0 : 22.0;
     NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
     paragraphStyle.minimumLineHeight = lineHeight;
     paragraphStyle.maximumLineHeight = lineHeight;
@@ -143,7 +141,7 @@
 + (NSDictionary *)postCardDateAttributes
 {
     CGFloat fontSize = [UIDevice isPad] ? 14.0 : 12.0;
-    CGFloat lineHeight = [UIDevice isPad] ? 21.0 : 18.0;
+    CGFloat lineHeight = [UIDevice isPad] ? 22.0 : 18.0;
     NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
     paragraphStyle.minimumLineHeight = lineHeight;
     paragraphStyle.maximumLineHeight = lineHeight;
@@ -153,7 +151,7 @@
 + (NSDictionary *)postCardStatusAttributes
 {
     CGFloat fontSize = [UIDevice isPad] ? 14.0 : 12.0;
-    CGFloat lineHeight = [UIDevice isPad] ? 21.0 : 18.0;
+    CGFloat lineHeight = [UIDevice isPad] ? 22.0 : 18.0;
     NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
     paragraphStyle.minimumLineHeight = lineHeight;
     paragraphStyle.maximumLineHeight = lineHeight;
@@ -200,7 +198,6 @@
     button.titleLabel.font = [WPFontManager openSansSemiBoldFontOfSize:fontSize];
     [button setTitleColor:[WPStyleGuide wordPressBlue] forState:UIControlStateNormal];
     [button setTitleColor:[WPStyleGuide darkBlue] forState:UIControlStateHighlighted];
-    button.imageEdgeInsets = UIEdgeInsetsMake(0.0, 0.0, 0.0, 3.0);
 }
 
 @end

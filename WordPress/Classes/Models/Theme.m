@@ -3,8 +3,12 @@
 #import "ContextManager.h"
 #import "WPAccount.h"
 #import "AccountService.h"
+#import "NSString+Helpers.h"
 
-static NSDateFormatter *dateFormatter;
+static NSString* const ThemeAdminUrlCustomize = @"customize.php?theme=%@&hide_close=true";
+static NSString* const ThemeUrlDemoParameters = @"?demo=true&iframe=true&theme_preview=true";
+static NSString* const ThemeUrlSupport = @"https://wordpress.com/themes/%@/support/?preview=true&iframe=true";
+static NSString* const ThemeUrlDetails = @"https://wordpress.com/themes/%@/%@/?preview=true&iframe=true";
 
 @implementation Theme
 
@@ -16,52 +20,49 @@ static NSDateFormatter *dateFormatter;
 @dynamic screenshotUrl;
 @dynamic trendingRank;
 @dynamic version;
+@dynamic author;
+@dynamic authorUrl;
 @dynamic tags;
 @dynamic name;
 @dynamic previewUrl;
+@dynamic price;
+@dynamic purchased;
+@dynamic demoUrl;
+@dynamic stylesheet;
+@dynamic order;
 @dynamic blog;
-
-+ (Theme *)createOrUpdateThemeFromDictionary:(NSDictionary *)themeInfo
-                                    withBlog:(Blog*)blog
-                                 withContext:(NSManagedObjectContext *)context
-{
-    Blog *contextBlog = (Blog*)[context objectWithID:blog.objectID];
-
-    Theme *theme;
-    NSSet *result = [contextBlog.themes filteredSetUsingPredicate:[NSPredicate predicateWithFormat:@"self.themeId == %@", themeInfo[@"id"]]];
-    if (result.count > 1) {
-        theme = result.allObjects[0];
-    } else {
-        theme = [NSEntityDescription insertNewObjectForEntityForName:NSStringFromClass(self)
-                                              inManagedObjectContext:context];
-        theme.themeId = themeInfo[@"id"];
-        theme.blog = contextBlog;
-    }
-
-    theme.name = themeInfo[@"name"];
-    theme.details = themeInfo[@"description"];
-    theme.trendingRank = themeInfo[@"trending_rank"];
-    theme.popularityRank = themeInfo[@"popularity_rank"];
-    theme.screenshotUrl = themeInfo[@"screenshot"];
-    theme.version = themeInfo[@"version"];
-    theme.premium = @([[themeInfo objectForKeyPath:@"cost.number"] integerValue] > 0);
-    theme.tags = themeInfo[@"tags"];
-    theme.previewUrl = themeInfo[@"preview_url"];
-
-    if (!dateFormatter) {
-        dateFormatter = [[NSDateFormatter alloc] init];
-        dateFormatter.dateFormat = @"YYYY-MM-dd";
-    }
-    theme.launchDate = [dateFormatter dateFromString:themeInfo[@"launch_date"]];
-
-    return theme;
-}
 
 #pragma mark - CoreData helpers
 
 + (NSString *)entityName
 {
     return NSStringFromClass([self class]);
+}
+
+#pragma mark - Links
+
+- (NSString *)customizeUrl
+{
+    NSString *path = [NSString stringWithFormat:ThemeAdminUrlCustomize, self.stylesheet];
+    
+    return [self.blog adminUrlWithPath:path];
+}
+
+- (NSString *)detailsUrl
+{
+    NSString *homeUrl = self.blog.homeURL.hostname;
+
+    return [NSString stringWithFormat:ThemeUrlDetails, homeUrl, self.themeId];
+}
+
+- (NSString *)supportUrl
+{
+    return [NSString stringWithFormat:ThemeUrlSupport, self.themeId];
+}
+
+- (NSString *)viewUrl
+{
+    return [self.demoUrl stringByAppendingString:ThemeUrlDemoParameters];
 }
 
 #pragma mark - Misc
@@ -73,7 +74,7 @@ static NSDateFormatter *dateFormatter;
 
 - (BOOL)isPremium
 {
-    return [self.premium isEqualToNumber:@1];
+    return [self.premium boolValue];
 }
 
 @end

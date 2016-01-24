@@ -5,7 +5,7 @@
 #import "WordPressAppDelegate.h"
 
 #import "WordPressComApi.h"
-#import <WPXMLRPCClient.h>
+#import <WordPressApi/WPXMLRPCClient.h>
 
 #import "ContextManager.h"
 #import "AccountService.h"
@@ -15,8 +15,8 @@
 
 #import <Helpshift/Helpshift.h>
 #import <Simperium/Simperium.h>
-#import <Mixpanel/Mixpanel.h>
 #import "Blog.h"
+#import "WPAnalyticsTrackerWPCom.h"
 
 #import "WordPress-Swift.h"
 
@@ -26,22 +26,7 @@
 #pragma mark Constants
 #pragma mark ====================================================================================
 
-NSString *const NotificationsManagerDidRegisterDeviceToken          = @"NotificationsManagerDidRegisterDeviceToken";
-NSString *const NotificationsManagerDidUnregisterDeviceToken        = @"NotificationsManagerDidUnregisterDeviceToken";
-
-static NSString *const NotificationsDeviceIdKey                     = @"notification_device_id";
-static NSString *const NotificationsLegacyPreferencesKey            = @"notification_preferences";
-static NSString *const NotificationsDeviceToken                     = @"apnsDeviceToken";
-
-// These correspond to the 'category' data WP.com will send with a push notification
-static NSString *const NotificationCategoryCommentApprove           = @"approve-comment";
-static NSString *const NotificationCategoryCommentLike              = @"like-comment";
-static NSString *const NotificationCategoryCommentReply             = @"replyto-comment";
-static NSString *const NotificationCategoryCommentReplyWithLike     = @"replyto-like-comment";
-
-static NSString *const NotificationActionCommentReply               = @"COMMENT_REPLY";
-static NSString *const NotificationActionCommentLike                = @"COMMENT_LIKE";
-static NSString *const NotificationActionCommentApprove             = @"COMMENT_MODERATE_APPROVE";
+static NSString *const NotificationsDeviceToken = @"apnsDeviceToken";
 
 
 #pragma mark ====================================================================================
@@ -49,143 +34,6 @@ static NSString *const NotificationActionCommentApprove             = @"COMMENT_
 #pragma mark ====================================================================================
 
 @implementation NotificationsManager
-
-+ (void)registerForPushNotifications
-{
-#if TARGET_IPHONE_SIMULATOR
-    return;
-#endif
-
-    BOOL canRegisterUserNotifications = [[UIApplication sharedApplication] respondsToSelector:@selector(registerForRemoteNotifications)];
-    if (!canRegisterUserNotifications) {
-        // iOS 7 notifications registration
-        UIRemoteNotificationType types = (UIRemoteNotificationTypeBadge | UIRemoteNotificationTypeSound | UIRemoteNotificationTypeAlert);
-        [[UIApplication sharedApplication] registerForRemoteNotificationTypes:types];
-    } else {
-        // iOS 8 or higher notifications registration
-        [[UIApplication sharedApplication] registerForRemoteNotifications];
-
-        // Add the categories to UIUserNotificationSettings
-        UIUserNotificationType types = UIUserNotificationTypeBadge | UIUserNotificationTypeSound | UIUserNotificationTypeAlert;
-        UIUserNotificationSettings *settings = [UIUserNotificationSettings settingsForTypes:types categories:[self buildNotificationCategories]];
-
-        // Finally, register the notification settings
-        [[UIApplication sharedApplication] registerUserNotificationSettings:settings];
-    }
-}
-
-
-#pragma mark - Device token registration
-
-+ (void)registerDeviceToken:(NSData *)deviceToken
-{
-    // We want to register Helpshift regardless so that way if a user isn't logged in
-    // they can still get push notifications that we replied to their support ticket.
-    [[Helpshift sharedInstance] registerDeviceToken:deviceToken];
-
-    [[Mixpanel sharedInstance].people addPushDeviceToken:deviceToken];
-
-    // Don't bother registering for WordPress anything if the user isn't logged in
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService  = [[AccountService alloc] initWithManagedObjectContext:context];
-    if (![accountService defaultWordPressComAccount]) {
-        return;
-    }
-
-    NSString *newToken  = [deviceToken.description stringByReplacingOccurrencesOfString: @"<" withString: @""];
-    newToken            = [newToken stringByReplacingOccurrencesOfString: @">" withString: @""];
-    newToken            = [newToken stringByReplacingOccurrencesOfString: @" " withString: @""];
-    
-    DDLogInfo(@"Device token received in didRegisterForRemoteNotificationsWithDeviceToken: %@", newToken);
-
-    // Store the token
-    NSUserDefaults *userDefaults    = [NSUserDefaults standardUserDefaults];
-    NSString *previousToken         = [userDefaults objectForKey:NotificationsDeviceToken];
-    
-    if (![previousToken isEqualToString:newToken]) {
-        DDLogInfo(@"Device Token has changed! OLD Value %@, NEW value %@", previousToken, newToken);
-        [userDefaults setObject:newToken forKey:NotificationsDeviceToken];
-        [userDefaults synchronize];
-    }
-    
-    // Notify Listeners
-    [[NSNotificationCenter defaultCenter] postNotificationName:NotificationsManagerDidRegisterDeviceToken object:newToken];
-
-    [self nukeLegacyPreferences];
-    [self syncPushNotificationInfo];
-}
-
-+ (void)registrationDidFail:(NSError *)error
-{
-    DDLogError(@"Failed to register for push notifications: %@", error);
-    [self unregisterDeviceToken];
-}
-
-+ (void)unregisterDeviceToken
-{
-    NSString *deviceId              = [[NSUserDefaults standardUserDefaults] stringForKey:NotificationsDeviceIdKey];
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService  = [[AccountService alloc] initWithManagedObjectContext:context];
-    WPAccount *defaultAccount       = [accountService defaultWordPressComAccount];
-
-    void (^successBlock)(void) = ^{
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        [defaults removeObjectForKey:NotificationsDeviceToken];
-        [defaults removeObjectForKey:NotificationsDeviceIdKey];
-        [defaults synchronize];
-        
-        NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-        [nc postNotificationName:NotificationsManagerDidUnregisterDeviceToken object:nil];
-    };
-    
-    void (^failureBlock)(NSError *error) = ^(NSError *error){
-        DDLogError(@"Couldn't unregister push token: %@", [error localizedDescription]);
-    };
-    
-    // This method may have been called as a result of an issue that's setting authTokens to nil
-    // in WordPress v5.3, if the user decides to log out of his WP.com account.  This is part of a
-    // hotfix for WordPress v5.3.1.
-    //
-    // The following conditional check is only performed in case the authToken is nil, since we
-    // can't really use the restApi to unregister the token in this case.
-    //
-    // For more info on the issue check this URL:
-    // https://github.com/wordpress-mobile/WordPress-iOS/pull/3956
-    //
-    // Feel free to remove the following code once we're in a galaxy far, far away (from WPiOS 5.3).
-    //
-    if (defaultAccount.authToken) {
-        [defaultAccount.restApi unregisterForPushNotificationsWithDeviceId:deviceId
-                                                                   success:successBlock
-                                                                   failure:failureBlock];
-    }
-}
-
-+ (BOOL)pushNotificationsEnabledInDeviceSettings
-{
-    // TODO: I must insist. Let's refactor this entire class please, in another issue!. JLP. Jul.15.2015
-    UIApplication *application = [UIApplication sharedApplication];
-    
-    // iOS 8+
-    if ([application respondsToSelector:@selector(currentUserNotificationSettings)]) {
-        return application.currentUserNotificationSettings.types != UIUserNotificationTypeNone;
-    }
-    
-    // iOS 7
-    return application.enabledRemoteNotificationTypes != UIRemoteNotificationTypeNone;
-}
-
-+ (NSString *)registeredPushNotificationsToken
-{
-    return [[NSUserDefaults standardUserDefaults] objectForKey:NotificationsDeviceToken];
-}
-
-+ (NSString *)registeredPushNotificationsDeviceId
-{
-    // TODO: Refactor this entire class please!. JLP. Jun.24.2015
-    return [[NSUserDefaults standardUserDefaults] objectForKey:NotificationsDeviceIdKey];
-}
-
 
 #pragma mark - Notification handling
 
@@ -212,10 +60,6 @@ static NSString *const NotificationActionCommentApprove             = @"COMMENT_
         return;
     }
     
-    if ([[userInfo stringForKey:@"origin"] isEqualToString:@"mp"]) {
-        [self handleMixpanelPushNotification:userInfo];
-        return;
-    }
     
     // WordPress.com Push Authentication Notification
     // Due to the Background Notifications entitlement, any given Push Notification's userInfo might be received
@@ -226,6 +70,30 @@ static NSString *const NotificationActionCommentApprove             = @"COMMENT_
     if ([authenticationManager isPushAuthenticationNotification:userInfo] && state != UIApplicationStateBackground) {
         [authenticationManager handlePushAuthenticationNotification:userInfo];
         return;
+    }
+    
+    //Bump Analytics here
+    NSMutableDictionary *mutablePushProperties = [NSMutableDictionary new];
+    if ([userInfo numberForKey:@"note_id"]) {
+         [mutablePushProperties setObject:[[userInfo numberForKey:@"note_id"] stringValue]
+                                   forKey:@"push_notification_note_id"];
+    }
+    if ([userInfo stringForKey:@"type"]) {
+        [mutablePushProperties setObject:[userInfo stringForKey:@"type"]
+                                  forKey:@"push_notification_type"];
+    }
+    NSString *token = [[NSUserDefaults standardUserDefaults] objectForKey:NotificationsDeviceToken];
+    if (token) {
+        // Token should be always available here
+        [mutablePushProperties setObject:token forKey:@"push_notification_token"];
+    }
+    
+    if (state == UIApplicationStateBackground) {
+        // The notification is delivered when the app isn’t running in the foreground.
+        [WPAnalytics track:WPAnalyticsStatPushNotificationReceived withProperties:mutablePushProperties];
+    } else if (state == UIApplicationStateInactive) {
+        // The user taps the notification item in the notifications center
+        [WPAnalytics track:WPAnalyticsStatPushNotificationAlertPressed withProperties:mutablePushProperties];
     }
     
     // Notification-Y Push Notifications
@@ -244,162 +112,6 @@ static NSString *const NotificationActionCommentApprove             = @"COMMENT_
                 completionHandler(result);
             }];
         }
-    }
-}
-
-+ (void)handleNotificationForApplicationLaunch:(NSDictionary *)launchOptions
-{
-    NSDictionary *remoteNotif = launchOptions[UIApplicationLaunchOptionsRemoteNotificationKey];
-    if (remoteNotif) {
-        DDLogVerbose(@"Launched with a remote notification as parameter:  %@", remoteNotif);
-        [[WPTabBarController sharedInstance] showNotificationsTab];
-    }
-}
-
-+ (void)handleActionWithIdentifier:(NSString *)identifier forRemoteNotification:(NSDictionary *)remoteNotification
-{
-    // Ensure we have a WP.com account
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-    
-    if (![[defaultAccount restApi] hasCredentials]) {
-        return;
-    }
-    
-    // Comment actions
-    if ([identifier isEqualToString:NotificationActionCommentLike] || [identifier isEqualToString:NotificationActionCommentApprove]) {
-        // Get the site and comment id
-        NSNumber *siteID = remoteNotification[@"blog_id"];
-        NSNumber *commentID = remoteNotification[@"comment_id"];
-        
-        if (siteID && commentID) {
-            NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
-            CommentService *commentService = [[CommentService alloc] initWithManagedObjectContext:context];
-
-            if ([identifier isEqualToString:NotificationActionCommentLike]) {
-                [commentService likeCommentWithID:commentID siteID:siteID
-                                          success:^{
-                                              DDLogInfo(@"Liked comment from push notification");
-                                          }
-                                          failure:^(NSError *error) {
-                                              DDLogInfo(@"Couldn't like comment from push notification");
-                                          }];
-            } else {
-                [commentService approveCommentWithID:commentID siteID:siteID
-                                             success:^{
-                                                 DDLogInfo(@"Successfully moderated comment from push notification");
-                                             }
-                                             failure:^(NSError *error) {
-                                                 DDLogInfo(@"Couldn't moderate comment from push notification");
-                                             }];
-            }
-        }
-    } else if ([identifier isEqualToString:NotificationActionCommentReply]) {
-        // Load notifications detail view
-        NSString *notificationID = [[remoteNotification numberForKey:@"note_id"] stringValue];
-        [[WPTabBarController sharedInstance] showNotificationsTabForNoteWithID:notificationID];
-    }
-}
-
-
-#pragma mark - WordPress.com XML RPC API
-
-+ (void)nukeLegacyPreferences
-{
-    NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
-    [userDefaults removeObjectForKey:NotificationsLegacyPreferencesKey];
-    [userDefaults synchronize];
-}
-
-+ (void)syncPushNotificationInfo
-{
-    NSString *token                 = [[NSUserDefaults standardUserDefaults] objectForKey:NotificationsDeviceToken];
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService  = [[AccountService alloc] initWithManagedObjectContext:context];
-    WPAccount *defaultAccount       = [accountService defaultWordPressComAccount];
-
-    [[defaultAccount restApi] syncPushNotificationInfoWithDeviceToken:token
-                                         success:^(NSString *deviceId, NSDictionary *settings) {
-                                             DDLogVerbose(@"Synced push notification token and received device ID %@ with settings:\n %@", deviceId, settings);
-
-                                             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-                                             [defaults setObject:deviceId forKey:NotificationsDeviceIdKey];
-                                             [defaults synchronize];
-                                         } failure:^(NSError *error) {
-                                             DDLogError(@"Failed to receive supported notification list: %@", error);
-                                         }
-     ];
-}
-
-
-#pragma mark - Enhanced Notifications
-
-+ (NSSet *)buildNotificationCategories
-{
-    // Build the notification actions
-    UIMutableUserNotificationAction *commentReplyAction = [[UIMutableUserNotificationAction alloc] init];
-    commentReplyAction.identifier = NotificationActionCommentReply;
-    commentReplyAction.title = NSLocalizedString(@"Reply", @"Reply to a comment (verb)");
-    commentReplyAction.activationMode = UIUserNotificationActivationModeForeground;
-    commentReplyAction.destructive = NO;
-    commentReplyAction.authenticationRequired = NO;
-
-    UIMutableUserNotificationAction *commentLikeAction = [[UIMutableUserNotificationAction alloc] init];
-    commentLikeAction.identifier = NotificationActionCommentLike;
-    commentLikeAction.title = NSLocalizedString(@"Like", @"Like (verb)");
-    commentLikeAction.activationMode = UIUserNotificationActivationModeBackground;
-    commentLikeAction.destructive = NO;
-    commentLikeAction.authenticationRequired = NO;
-
-    UIMutableUserNotificationAction *commentApproveAction = [[UIMutableUserNotificationAction alloc] init];
-    commentApproveAction.identifier = NotificationActionCommentApprove;
-    commentApproveAction.title = NSLocalizedString(@"Approve", @"Approve comment (verb)");
-    commentApproveAction.activationMode = UIUserNotificationActivationModeBackground;
-    commentApproveAction.destructive = NO;
-    commentApproveAction.authenticationRequired = NO;
-
-    // Add actions to categories
-    UIMutableUserNotificationCategory *commentApproveCategory = [[UIMutableUserNotificationCategory alloc] init];
-    commentApproveCategory.identifier = NotificationCategoryCommentApprove;
-    [commentApproveCategory setActions:@[commentApproveAction] forContext:UIUserNotificationActionContextDefault];
-
-    UIMutableUserNotificationCategory *commentReplyCategory = [[UIMutableUserNotificationCategory alloc] init];
-    commentReplyCategory.identifier = NotificationCategoryCommentReply;
-    [commentReplyCategory setActions:@[commentReplyAction] forContext:UIUserNotificationActionContextDefault];
-
-    UIMutableUserNotificationCategory *commentLikeCategory = [[UIMutableUserNotificationCategory alloc] init];
-    commentLikeCategory.identifier = NotificationCategoryCommentLike;
-    [commentLikeCategory setActions:@[commentLikeAction] forContext:UIUserNotificationActionContextDefault];
-
-    UIMutableUserNotificationCategory *commentReplyWithLikeCategory = [[UIMutableUserNotificationCategory alloc] init];
-    commentReplyWithLikeCategory.identifier = NotificationCategoryCommentReplyWithLike;
-    [commentReplyWithLikeCategory setActions:@[commentLikeAction, commentReplyAction] forContext:UIUserNotificationActionContextDefault];
-
-    return [NSSet setWithObjects:commentApproveCategory, commentReplyCategory, commentLikeCategory, commentReplyWithLikeCategory, nil];
-}
-
-#pragma mark - Mixpanel A/B Tests
-
-+ (void)handleMixpanelPushNotification:(NSDictionary *)userInfo
-{
-    NSString *targetToOpen = [userInfo stringForKey:@"open"];
-    if ([targetToOpen isEqualToString:@"reader"]) {
-        [[WPTabBarController sharedInstance] showReaderTab];
-    } else if ([targetToOpen isEqualToString:@"notifications"]) {
-        [[WPTabBarController sharedInstance] showNotificationsTab];
-    } else if ([targetToOpen isEqualToString:@"stats"]) {
-        [self openStatsForLastUsedOrFirstWPComBlog];
-    }
-}
-
-+ (void)openStatsForLastUsedOrFirstWPComBlog
-{
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    Blog *blog = [blogService lastUsedOrFirstBlogThatSupports:BlogFeatureStats];
-    if (blog != nil) {
-        [[WPTabBarController sharedInstance] switchMySitesTabToStatsViewForBlog:blog];
     }
 }
 

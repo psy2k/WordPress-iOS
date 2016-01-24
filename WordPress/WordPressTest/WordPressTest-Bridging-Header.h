@@ -3,6 +3,7 @@
 //
 
 #import "ContextManager.h"
+#import "ContextManager-Internals.h"
 #import "TestContextManager.h"
 #import "WPAccount.h"
 #import "Blog.h"
@@ -10,8 +11,7 @@
 #import "Post.h"
 #import "Page.h"
 #import "ReaderPost.h"
-#import "UIAlertView+Blocks.h"
-#import "NSDictionary+SafeExpectations.h"
-#import "UIAlertViewProxy.h"
-#import <WordPressCom-Analytics-iOS/WPAnalytics.h>
+#import "UIAlertControllerProxy.h"
+#import <NSObject_SafeExpectations/NSObject+SafeExpectations.h>
+#import <WordPressComAnalytics/WPAnalytics.h>
 #import <OHHTTPStubs/OHHTTPStubs.h>

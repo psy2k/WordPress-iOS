@@ -1,6 +1,6 @@
 import Foundation
 import UIKit
-
+import WordPressShared.WPFontManager
 
 public class NavigationTitleView : UIView
 {
@@ -11,6 +11,12 @@ public class NavigationTitleView : UIView
     // MARK: - UIView's Methods
     convenience init() {
         self.init(frame: NavigationTitleView.defaultViewFrame)
+    }
+    
+    convenience init(title: String?, subtitle: String?) {
+        self.init()
+        titleLabel.text     = title ?? String()
+        subtitleLabel.text  = subtitle ?? String()
     }
     
     override init(frame: CGRect) {

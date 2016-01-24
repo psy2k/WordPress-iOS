@@ -9,7 +9,6 @@
 #import "WPCookie.h"
 #import "Constants.h"
 #import "WPError.h"
-#import "UIAlertView+Blocks.h"
 #import "UIImage+Util.h"
 #import "WPStyleGuide+WebView.h"
 #import "WordPress-Swift.h"
@@ -35,7 +34,7 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
 #pragma mark - Private Properties
 
-@interface WPWebViewController () <UIWebViewDelegate, UIPopoverControllerDelegate>
+@interface WPWebViewController () <UIWebViewDelegate>
 
 @property (nonatomic,   weak) IBOutlet UIWebView                *webView;
 @property (nonatomic,   weak) IBOutlet UIProgressView           *progressView;
@@ -48,7 +47,6 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 @property (nonatomic,   weak) IBOutlet NSLayoutConstraint       *toolbarBottomConstraint;
 
 @property (nonatomic, strong) NavigationTitleView               *titleView;
-@property (nonatomic, strong) UIPopoverController               *popover;
 @property (nonatomic, assign) BOOL                              loading;
 @property (nonatomic, assign) BOOL                              needsLogin;
 
@@ -103,8 +101,10 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
     self.webView.scalesPageToFit            = YES;
     
     // Share
-    self.navigationItem.rightBarButtonItem  = self.optionsButton;
-    
+    if (!self.secureInteraction) {
+        self.navigationItem.rightBarButtonItem  = self.optionsButton;
+    }
+
     // Fire away!
     [self applyModalStyleIfNeeded];
     [self loadWebViewRequest];
@@ -239,6 +239,10 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
 - (void)showBottomToolbarIfNeeded
 {
+    if (self.secureInteraction) {
+        return;
+    }
+
     if (!self.webView.canGoBack && !self.webView.canGoForward) {
         return;
     }
@@ -311,28 +315,19 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
     if (title) {
         [activityViewController setValue:title forKey:@"subject"];
     }
-    activityViewController.completionHandler = ^(NSString *activityType, BOOL completed) {
+    activityViewController.completionWithItemsHandler = ^(NSString *activityType, BOOL completed, NSArray *returnedItems, NSError *activityError) {
         if (!completed) {
             return;
         }
         [WPActivityDefaults trackActivityType:activityType];
     };
 
-    if ([UIDevice isPad]) {
-        self.popover = [[UIPopoverController alloc] initWithContentViewController:activityViewController];
-        self.popover.delegate = self;
-        [self.popover presentPopoverFromBarButtonItem:self.optionsButton permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
-    } else {
-        [self presentViewController:activityViewController animated:YES completion:nil];
+    if ([UIDevice isPad]) {        
+        activityViewController.modalPresentationStyle = UIModalPresentationPopover;
+        activityViewController.popoverPresentationController.barButtonItem = self.optionsButton;
     }
-}
-
-
-#pragma mark - UIPopover Delegate
-
-- (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController
-{
-    self.popover = nil;
+    
+    [self presentViewController:activityViewController animated:YES completion:nil];
 }
 
 
@@ -395,7 +390,12 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
     if (error.code == WPWebViewErrorAjaxCancelled || error.code == WPWebViewErrorFrameLoadInterrupted) {
         return;
     }
-    
+
+    [self displayLoadError:error];
+}
+
+- (void)displayLoadError:(NSError *)error
+{
     [WPError showAlertWithTitle:NSLocalizedString(@"Error", nil) message:error.localizedDescription];
 }
 
@@ -449,12 +449,21 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
 - (NSURLRequest *)newRequestForWebsite
 {
-    NSString *userAgent = [[WordPressAppDelegate sharedInstance].userAgent currentUserAgent];
+    NSString *userAgent = [[WordPressAppDelegate sharedInstance].userAgent wordPressUserAgent];
     if (!self.needsLogin) {
         return [WPURLRequest requestWithURL:self.url userAgent:userAgent];
     }
     
-    NSURL *loginURL = self.wpLoginURL ?: [[NSURL alloc] initWithScheme:self.url.scheme host:self.url.host path:@"/wp-login.php"];
+    NSURL *loginURL = self.wpLoginURL;
+    
+    if (!loginURL) {
+        // Thank you, iOS 9, everything is more compact and pretty, now.
+        NSURLComponents *components = [NSURLComponents new];
+        components.scheme           = self.url.scheme;
+        components.host             = self.url.host;
+        components.path             = @"/wp-login.php";
+        loginURL                    = components.URL;
+    }
     return [WPURLRequest requestForAuthenticationWithURL:loginURL
                                              redirectURL:self.url
                                                 username:self.username

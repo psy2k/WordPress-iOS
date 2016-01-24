@@ -1,14 +1,22 @@
 #import "PostCardTableViewCell.h"
+#import <AFNetworking/UIKit+AFNetworking.h>
 #import "BasePost.h"
 #import "PhotonImageURLHelper.h"
 #import "PostCardActionBar.h"
 #import "PostCardActionBarItem.h"
 #import "UIImageView+Gravatar.h"
+#import <WordPressShared/WPStyleGuide.h>
 #import "WPStyleGuide+Posts.h"
-#import <WordPress-iOS-Shared/WPStyleGuide.h>
 #import "Wordpress-Swift.h"
 
-static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
+static const UIEdgeInsets ActionbarButtonImageInsets = {0.0, 0.0, 0.0, 4.0};
+
+typedef NS_ENUM(NSUInteger, ActionBarMode) {
+    ActionBarModePublish = 1,
+    ActionBarModeDraft,
+    ActionBarModeTrash,
+};
+
 
 @interface PostCardTableViewCell()
 
@@ -32,6 +40,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 @property (nonatomic, strong) IBOutlet UIButton *metaButtonRight;
 @property (nonatomic, strong) IBOutlet UIButton *metaButtonLeft;
 @property (nonatomic, strong) IBOutlet PostCardActionBar *actionBar;
+@property (nonatomic, strong) IBOutlet NSLayoutConstraint *headerViewLeftConstraint;
 @property (nonatomic, strong) IBOutlet NSLayoutConstraint *headerViewHeightConstraint;
 @property (nonatomic, strong) IBOutlet NSLayoutConstraint *headerViewLowerConstraint;
 @property (nonatomic, strong) IBOutlet NSLayoutConstraint *titleLowerConstraint;
@@ -42,17 +51,19 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 @property (nonatomic, strong) IBOutlet NSLayoutConstraint *postContentBottomConstraint;
 @property (nonatomic, strong) IBOutlet NSLayoutConstraint *maxIPadWidthConstraint;
 @property (nonatomic, strong) IBOutlet NSLayoutConstraint *postCardImageViewBottomConstraint;
+@property (nonatomic, strong) IBOutlet NSLayoutConstraint *postCardImageViewHeightConstraint;
 
 @property (nonatomic, weak) id<WPPostContentViewProvider>contentProvider;
-@property (nonatomic, assign) CGFloat headerViewHeight;
-@property (nonatomic, assign) CGFloat headerViewLowerMargin;
-@property (nonatomic, assign) CGFloat titleViewLowerMargin;
-@property (nonatomic, assign) CGFloat snippetViewLowerMargin;
-@property (nonatomic, assign) CGFloat dateViewLowerMargin;
-@property (nonatomic, assign) CGFloat statusViewHeight;
-@property (nonatomic, assign) CGFloat statusViewLowerMargin;
-@property (nonatomic, assign) BOOL loadImagesWhenConfigured;
-@property (nonatomic, assign) BOOL didPreserveStartingConstraintConstants;
+@property (nonatomic) CGFloat headerViewHeight;
+@property (nonatomic) CGFloat headerViewLowerMargin;
+@property (nonatomic) CGFloat titleViewLowerMargin;
+@property (nonatomic) CGFloat snippetViewLowerMargin;
+@property (nonatomic) CGFloat dateViewLowerMargin;
+@property (nonatomic) CGFloat statusViewHeight;
+@property (nonatomic) CGFloat statusViewLowerMargin;
+@property (nonatomic) BOOL configureForLayoutOnly;
+@property (nonatomic) BOOL didPreserveStartingConstraintConstants;
+@property (nonatomic) ActionBarMode currentActionBarMode;
 
 @end
 
@@ -92,7 +103,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     // the cell if needed.
     [self preserveStartingConstraintConstants];
     if (self.contentProvider) {
-        [self configureCell:self.contentProvider loadingImages:self.loadImagesWhenConfigured];
+        [self configureCell:self.contentProvider layoutOnly:self.configureForLayoutOnly];
     }
 }
 
@@ -114,7 +125,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 
     if (self.postCardImageView) {
         // the image cell xib
-        height += CGRectGetHeight(self.postCardImageView.frame);
+        height += self.postCardImageViewHeightConstraint.constant;
         height += self.postCardImageViewBottomConstraint.constant;
     }
 
@@ -140,11 +151,11 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 - (CGFloat)innerWidthForSize:(CGSize)size
 {
     CGFloat width = 0.0;
-    CGFloat horizontalMargin = CGRectGetMinX(self.headerView.frame);
+    CGFloat horizontalMargin = self.headerViewLeftConstraint.constant;
     // FIXME: Ideally we'd check `self.maxIPadWidthConstraint.isActive` but that
     // property is iOS 8 only. When iOS 7 support is ended update this and check
     // the constraint. 
-    if ([UIDevice isPad]) {
+    if ([UIDevice isPad] && size.width >= self.maxIPadWidthConstraint.constant) {
         width = self.maxIPadWidthConstraint.constant;
     } else {
         width = size.width;
@@ -215,15 +226,6 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 }
 
 
-#pragma mark - Helpers
-
-- (NSURL *)blavatarURL
-{
-    NSInteger size = (NSInteger)ceil(CGRectGetWidth(self.avatarImageView.frame) * [[UIScreen mainScreen] scale]);
-    return [self.avatarImageView blavatarURLForHost:[self.contentProvider blavatarForDisplay] withSize:size];
-}
-
-
 #pragma mark - Configuration
 
 - (void)preserveStartingConstraintConstants
@@ -256,12 +258,12 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 
 - (void)configureCell:(id<WPPostContentViewProvider>)contentProvider
 {
-    [self configureCell:contentProvider loadingImages:YES];
+    [self configureCell:contentProvider layoutOnly:NO];
 }
 
-- (void)configureCell:(id<WPPostContentViewProvider>)contentProvider loadingImages:(BOOL)loadImages
+- (void)configureCell:(id<WPPostContentViewProvider>)contentProvider layoutOnly:(BOOL)layoutOnly
 {
-    self.loadImagesWhenConfigured = loadImages;
+    self.configureForLayoutOnly = layoutOnly;
     self.contentProvider = contentProvider;
 
     if (!self.didPreserveStartingConstraintConstants) {
@@ -292,21 +294,22 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     self.headerView.hidden = NO;
     self.headerViewHeightConstraint.constant = self.headerViewHeight;
     self.headerViewLowerConstraint.constant = self.headerViewLowerMargin;
+
+    // No need to worry about text or image when configuring only layout
+    if (self.configureForLayoutOnly) {
+        return;
+    }
+
     self.authorBlogLabel.text = [self.contentProvider blogNameForDisplay];
     self.authorNameLabel.text = [self.contentProvider authorNameForDisplay];
+    UIImage *placeholder = [UIImage imageNamed:@"post-blavatar-placeholder"];
 
-    UIImage *placeholder =[UIImage imageNamed:@"post-blavatar-placeholder"];
-    if (self.loadImagesWhenConfigured) {
-        [self.avatarImageView setImageWithURL:[self blavatarURL]
-                             placeholderImage:placeholder];
-    } else {
-        self.avatarImageView.image = placeholder;
-    }
+    [self.avatarImageView setImageWithSiteIcon:[self.contentProvider blavatarForDisplay] placeholderImage:placeholder];
 }
 
 - (void)configureCardImage
 {
-    if (!self.loadImagesWhenConfigured) {
+    if (self.configureForLayoutOnly) {
         return;
     }
 
@@ -394,6 +397,10 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 
 - (void)configureMetaButtons
 {
+    if (self.configureForLayoutOnly) {
+        return;
+    }
+
     [self resetMetaButton:self.metaButtonRight];
     [self resetMetaButton:self.metaButtonLeft];
 
@@ -436,6 +443,10 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 
 - (void)configureActionBar
 {
+    if (self.configureForLayoutOnly) {
+        return;
+    }
+
     NSString *status = [self.contentProvider status];
     if ([status isEqualToString:PostStatusPublish] || [status isEqualToString:PostStatusPrivate]) {
         [self configurePublishedActionBar];
@@ -450,6 +461,11 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 
 - (void)configurePublishedActionBar
 {
+    if (self.currentActionBarMode == ActionBarModePublish) {
+        return;
+    }
+    self.currentActionBarMode = ActionBarModePublish;
+
     __weak __typeof(self) weakSelf = self;
     NSMutableArray *items = [NSMutableArray array];
     PostCardActionBarItem *item = [PostCardActionBarItem itemWithTitle:NSLocalizedString(@"Edit", @"Label for the edit post button. Tapping displays the editor.")
@@ -458,6 +474,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf editPostAction];
     };
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     item = [PostCardActionBarItem itemWithTitle:NSLocalizedString(@"View", @"Label for the view post button. Tapping displays the post as it appears on the web.")
@@ -466,7 +483,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf viewPostAction];
     };
-    item.imageInsets = ViewButtonImageInsets;
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     if ([self.contentProvider supportsStats]) {
@@ -476,6 +493,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
         item.callback = ^{
             [weakSelf statsPostAction];
         };
+        item.imageInsets = ActionbarButtonImageInsets;
         [items addObject:item];
     }
 
@@ -485,6 +503,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf trashPostAction];
     };
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     [self.actionBar setItems:items];
@@ -492,6 +511,11 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 
 - (void)configureDraftActionBar
 {
+    if (self.currentActionBarMode == ActionBarModeDraft) {
+        return;
+    }
+    self.currentActionBarMode = ActionBarModeDraft;
+
     __weak __typeof(self) weakSelf = self;
     NSMutableArray *items = [NSMutableArray array];
     PostCardActionBarItem *item = [PostCardActionBarItem itemWithTitle:NSLocalizedString(@"Edit", @"Label for the edit post button. Tapping displays the editor.")
@@ -500,6 +524,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf editPostAction];
     };
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     item = [PostCardActionBarItem itemWithTitle:NSLocalizedString(@"Preview", @"Label for the preview post button. Tapping shows a preview of the post.")
@@ -508,6 +533,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf viewPostAction];
     };
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     item = [PostCardActionBarItem itemWithTitle:NSLocalizedString(@"Publish", @"Label for the publish button. Tapping publishes a draft post.")
@@ -516,6 +542,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf publishPostAction];
     };
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     item = [PostCardActionBarItem itemWithTitle:NSLocalizedString(@"Trash", @"Label for the trash post button. Tapping moves a post to the trash bin.")
@@ -524,6 +551,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf trashPostAction];
     };
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     [self.actionBar setItems:items];
@@ -531,6 +559,11 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
 
 - (void)configureTrashedActionBar
 {
+    if (self.currentActionBarMode == ActionBarModeTrash) {
+        return;
+    }
+    self.currentActionBarMode = ActionBarModeTrash;
+
     __weak __typeof(self) weakSelf = self;
     NSMutableArray *items = [NSMutableArray array];
     PostCardActionBarItem *item = [PostCardActionBarItem itemWithTitle:NSLocalizedString(@"Restore", @"Label for restoring a trashed post.")
@@ -539,6 +572,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf restorePostAction];
     };
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     item = [PostCardActionBarItem itemWithTitle:NSLocalizedString(@"Delete", @"Label for the delete post buton. Tapping permanently deletes a post.")
@@ -547,6 +581,7 @@ static const UIEdgeInsets ViewButtonImageInsets = {2.0, 0.0, 0.0, 0.0};
     item.callback = ^{
         [weakSelf trashPostAction];
     };
+    item.imageInsets = ActionbarButtonImageInsets;
     [items addObject:item];
 
     [self.actionBar setItems:items];

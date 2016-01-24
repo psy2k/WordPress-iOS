@@ -1,7 +1,7 @@
 #import "ActivityLogViewController.h"
 #import "WordPressAppDelegate.h"
 #import "ActivityLogDetailViewController.h"
-#import <DDFileLogger.h>
+#import <CocoaLumberjack/DDFileLogger.h>
 #import "WPTableViewSectionHeaderFooterView.h"
 #import "WordPress-Swift.h"
 #import "WPLogger.h"
@@ -30,7 +30,7 @@ static NSString *const ActivityLogCellIdentifier = @"ActivityLogCell";
         self.title = NSLocalizedString(@"Activity Logs", @"");
 
         UIBarButtonItem *backButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Logs", @"")
-                                                                       style:UIBarButtonItemStyleBordered
+                                                                       style:UIBarButtonItemStylePlain
                                                                       target:nil
                                                                       action:nil];
         [self.navigationItem setBackBarButtonItem:backButton];
@@ -44,7 +44,8 @@ static NSString *const ActivityLogCellIdentifier = @"ActivityLogCell";
     [super viewDidLoad];
     
     [self.tableView setRowHeight:WPTableViewDefaultRowHeight];
-    
+
+    [WPStyleGuide resetReadableMarginsForTableView:self.tableView];
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
     [self loadLogFiles];
 
