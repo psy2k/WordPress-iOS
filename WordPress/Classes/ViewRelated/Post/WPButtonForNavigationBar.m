@@ -1,4 +1,5 @@
 #import "WPButtonForNavigationBar.h"
+#import "WordPress-Swift.h"
 
 static CGFloat kDefaultAnimationDuration = 0.3;
 static CGFloat kHighlightedAlpha = 0.2f;
@@ -55,7 +56,11 @@ static CGFloat kNormalAlpha = 1.0f;
 	if (self.removeDefaultRightSpacing) {
 		insets = UIEdgeInsetsMake(0, 0, 0, kDefaultSpacing - self.rightSpacing);
 	}
-	
+
+    if ([self userInterfaceLayoutDirection] == UIUserInterfaceLayoutDirectionRightToLeft) {
+        insets = [InsetsHelper flipForRightToLeftLayoutDirection:insets];
+    }
+
 	return insets;
 }
 
@@ -65,7 +70,9 @@ static CGFloat kNormalAlpha = 1.0f;
 {
 	self.adjustsImageWhenHighlighted = NO;
 	
-	[self addTarget:self action:@selector(touchDown:) forControlEvents:UIControlEventTouchDown];
+    [self addTarget:self action:@selector(touchDown:) forControlEvents:UIControlEventTouchDown];
+    [self addTarget:self action:@selector(touchUpInside:) forControlEvents:UIControlEventTouchUpInside];
+    [self addTarget:self action:@selector(touchUpOutside:) forControlEvents:UIControlEventTouchUpOutside];
 	[self addTarget:self action:@selector(touchDragInside:) forControlEvents:UIControlEventTouchDragInside];
 	[self addTarget:self action:@selector(touchDragOutside:) forControlEvents:UIControlEventTouchDragOutside];
 }
@@ -73,6 +80,16 @@ static CGFloat kNormalAlpha = 1.0f;
 - (void)touchDown:(id)sender
 {
 	[self setAlpha:kHighlightedAlpha];
+}
+
+- (void)touchUpInside:(id)sender
+{
+    [self setAlpha:kNormalAlpha];
+}
+
+- (void)touchUpOutside:(id)sender
+{
+    [self setAlpha:kNormalAlpha];
 }
 
 - (void)touchDragInside:(id)sender

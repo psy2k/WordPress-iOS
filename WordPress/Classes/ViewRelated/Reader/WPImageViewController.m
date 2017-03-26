@@ -2,18 +2,24 @@
 
 #import <AFNetworking/UIKit+AFNetworking.h>
 #import "WordPressAppDelegate.h"
-
+#import "WordPress-Swift.h"
 
 static CGFloat const MaximumZoomScale = 4.0;
 static CGFloat const MinimumZoomScale = 0.1;
 
-@interface WPImageViewController ()<UIScrollViewDelegate>
+@interface WPImageViewController ()<UIScrollViewDelegate, FlingableViewHandlerDelegate>
+
+@property (nonatomic, strong) NSURL *url;
+@property (nonatomic, strong) UIImage *image;
+@property (nonatomic, strong) Media *media;
 
 @property (nonatomic, assign) BOOL isLoadingImage;
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIImageView *imageView;
 @property (nonatomic, assign) BOOL shouldHideStatusBar;
 @property (nonatomic, strong) UIActivityIndicatorView *activityIndicatorView;
+
+@property (nonatomic) FlingableViewHandler *flingableViewHandler;
 
 @end
 
@@ -28,7 +34,12 @@ static CGFloat const MinimumZoomScale = 0.1;
 
 - (instancetype)initWithURL:(NSURL *)url
 {
-    return [self initWithImage:nil andURL: url];
+    return [self initWithImage:nil andURL:url];
+}
+
+- (instancetype)initWithMedia:(Media *)media
+{
+    return [self initWithImage:nil andMedia:media];
 }
 
 - (instancetype)initWithImage:(UIImage *)image andURL:(NSURL *)url
@@ -39,6 +50,27 @@ static CGFloat const MinimumZoomScale = 0.1;
         _url = url;
     }
     return self;
+}
+
+- (instancetype)initWithImage:(UIImage *)image andMedia:(Media *)media
+{
+    self = [super init];
+    if (self) {
+        _image = [image copy];
+        _media = media;
+    }
+    return self;
+}
+
+- (void)setIsLoadingImage:(BOOL)isLoadingImage
+{
+    _isLoadingImage = isLoadingImage;
+
+    if (isLoadingImage) {
+        [self.activityIndicatorView startAnimating];
+    } else {
+        [self.activityIndicatorView stopAnimating];
+    }
 }
 
 - (void)viewDidLoad
@@ -69,7 +101,10 @@ static CGFloat const MinimumZoomScale = 0.1;
     [tgr1 setNumberOfTapsRequired:1];
     [tgr1 requireGestureRecognizerToFail:tgr2];
     [self.scrollView addGestureRecognizer:tgr1];
-    
+
+    self.flingableViewHandler = [[FlingableViewHandler alloc] initWithTargetView:self.scrollView];
+    self.flingableViewHandler.delegate = self;
+
     self.activityIndicatorView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
     self.activityIndicatorView.color = [WPStyleGuide greyDarken30];
     self.activityIndicatorView.hidesWhenStopped = YES;
@@ -87,35 +122,57 @@ static CGFloat const MinimumZoomScale = 0.1;
     }
 
     if (self.image != nil) {
-        self.imageView.image = self.image;
-        [self.imageView sizeToFit];
-        self.scrollView.contentSize = self.imageView.image.size;
-        [self centerImage];
-
+        [self updateImageView];
     } else if (self.url) {
-        self.isLoadingImage = YES;
-        [self.activityIndicatorView startAnimating];
-        __weak __typeof__(self) weakSelf = self;
-        [_imageView setImageWithURLRequest:[NSURLRequest requestWithURL:self.url]
-                         placeholderImage:self.image
-                                  success:^(NSURLRequest *request, NSHTTPURLResponse *response, UIImage *image) {
-                                      __typeof__(self) strongSelf = weakSelf;
-                                      if (!strongSelf) {
-                                          return;
-                                      }
-                                      [strongSelf.activityIndicatorView stopAnimating];
-                                      strongSelf.imageView.image = image;
-                                      [strongSelf.imageView sizeToFit];
-                                      strongSelf.scrollView.contentSize = strongSelf.imageView.image.size;
-                                      [strongSelf centerImage];
-                                      strongSelf.isLoadingImage = NO;
-                                  } failure:^(NSURLRequest *request, NSHTTPURLResponse *response, NSError *error) {
-                                      DDLogError(@"Error loading image: %@", error);
-                                      __typeof__(self) strongSelf = weakSelf;
-                                      [strongSelf.activityIndicatorView stopAnimating];
-                                      strongSelf.isLoadingImage = NO;
-                                  }];
+        [self loadImageFromURL];
+    } else if (self.media) {
+        [self loadImageFromMedia];
     }
+}
+
+- (void)updateImageView
+{
+    self.imageView.image = self.image;
+    [self.imageView sizeToFit];
+    self.scrollView.contentSize = self.imageView.image.size;
+    [self centerImage];
+}
+
+- (void)loadImageFromURL
+{
+    self.isLoadingImage = YES;
+
+    __weak __typeof__(self) weakSelf = self;
+    [_imageView setImageWithURLRequest:[NSURLRequest requestWithURL:self.url]
+                      placeholderImage:self.image
+                               success:^(NSURLRequest *request, NSHTTPURLResponse *response, UIImage *image) {
+                                   weakSelf.image = image;
+                                   [weakSelf updateImageView];
+                                   weakSelf.isLoadingImage = NO;
+                               } failure:^(NSURLRequest *request, NSHTTPURLResponse *response, NSError *error) {
+                                   DDLogError(@"Error loading image: %@", error);
+                                   weakSelf.isLoadingImage = NO;
+                               }];
+}
+
+- (void)loadImageFromMedia
+{
+    self.isLoadingImage = YES;
+
+    __weak __typeof__(self) weakSelf = self;
+    self.imageView.image = self.image;
+    [self.media imageWithSize:CGSizeZero completionHandler:^(UIImage *result, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (error) {
+                DDLogError(@"Error loading image: %@", error);
+                weakSelf.isLoadingImage = NO;
+            } else {
+                weakSelf.image = result;
+                [weakSelf updateImageView];
+                weakSelf.isLoadingImage = NO;
+            }
+        });
+    }];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -215,6 +272,15 @@ static CGFloat const MinimumZoomScale = 0.1;
     }
 
     self.imageView.frame = frame;
+
+    [self updateFlingableViewHandlerActiveState];
+}
+
+- (void)updateFlingableViewHandlerActiveState
+{
+    BOOL isScrollViewZoomedOut = (self.scrollView.zoomScale == self.scrollView.minimumZoomScale);
+
+    self.flingableViewHandler.isActive = isScrollViewZoomedOut;
 }
 
 #pragma mark - Status bar management
@@ -254,6 +320,24 @@ static CGFloat const MinimumZoomScale = 0.1;
     }
     
     return NO;
+}
+
+#pragma mark - FlingableViewHandlerDelegate
+
+- (void)flingableViewHandlerDidBeginRecognizingGesture:(FlingableViewHandler *)handler
+{
+    self.scrollView.multipleTouchEnabled = NO;
+}
+
+- (void)flingableViewHandlerDidEndRecognizingGesture:(FlingableViewHandler *)handler {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self dismissViewControllerAnimated:YES completion:nil];
+    });
+}
+
+- (void)flingableViewHandlerWasCancelled:(FlingableViewHandler *)handler
+{
+    self.scrollView.multipleTouchEnabled = YES;
 }
 
 @end

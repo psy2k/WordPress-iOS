@@ -9,7 +9,6 @@
 #import "EditCommentViewController.h"
 #import "EditReplyViewController.h"
 #import "PostService.h"
-#import "Post.h"
 #import "BlogService.h"
 #import "SuggestionsTableView.h"
 #import "SuggestionService.h"
@@ -37,16 +36,19 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 
 @interface CommentViewController () <UITableViewDataSource, UITableViewDelegate, ReplyTextViewDelegate, SuggestionsTableViewDelegate>
 
-@property (nonatomic, strong) UITableView           *tableView;
-@property (nonatomic, strong) ReplyTextView         *replyTextView;
-@property (nonatomic, strong) SuggestionsTableView  *suggestionsTableView;
+@property (nonatomic, strong) UITableView               *tableView;
+@property (nonatomic, strong) ReplyTextView             *replyTextView;
+@property (nonatomic, strong) SuggestionsTableView      *suggestionsTableView;
+@property (nonatomic, strong) NSLayoutConstraint        *bottomLayoutConstraint;
+@property (nonatomic, strong) KeyboardDismissHelper     *keyboardManager;
 
-@property (nonatomic, strong) NSDictionary          *layoutIdentifiersMap;
-@property (nonatomic, strong) NSDictionary          *reuseIdentifiersMap;
-@property (nonatomic, assign) NSUInteger            numberOfRows;
-@property (nonatomic, assign) NSUInteger            rowNumberForHeader;
-@property (nonatomic, assign) NSUInteger            rowNumberForComment;
-@property (nonatomic, assign) NSUInteger            rowNumberForActions;
+@property (nonatomic, strong) NSDictionary              *reuseIdentifiersMap;
+@property (nonatomic, assign) NSUInteger                numberOfRows;
+@property (nonatomic, assign) NSUInteger                rowNumberForHeader;
+@property (nonatomic, assign) NSUInteger                rowNumberForComment;
+@property (nonatomic, assign) NSUInteger                rowNumberForActions;
+
+@property (nonatomic, strong) NSCache                   *estimatedRowHeights;
 
 @end
 
@@ -66,17 +68,18 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
                                           action:@selector(dismissKeyboardIfNeeded:)];
     tapRecognizer.cancelsTouchesInView = NO;
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
-    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.tableView.cellLayoutMarginsFollowReadableWidth = NO;
-    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.tableView.delegate = self;
-    self.tableView.dataSource = self;
-    self.tableView.estimatedRowHeight = 44.0;
-    [self.tableView addGestureRecognizer:tapRecognizer];
-    [self.view addSubview:self.tableView];
+    UITableView *tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    tableView.cellLayoutMarginsFollowReadableWidth = YES;
+    tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    tableView.delegate = self;
+    tableView.dataSource = self;
+    [tableView addGestureRecognizer:tapRecognizer];
+    [self.view addSubview:tableView];
 
-    [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
+    self.tableView = tableView;
+
+    [WPStyleGuide configureColorsForView:self.view andTableView:tableView];
 
     // Register Cell Nibs
     NSArray *cellClassNames = @[
@@ -91,13 +94,14 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
         UINib *tableViewCellNib = [UINib nibWithNibName:className bundle:[NSBundle mainBundle]];
         
         [self.tableView registerNib:tableViewCellNib forCellReuseIdentifier:[cellClass reuseIdentifier]];
-        [self.tableView registerNib:tableViewCellNib forCellReuseIdentifier:[cellClass layoutIdentifier]];
     }
 
-    
     [self attachSuggestionsTableViewIfNeeded];
     [self attachReplyViewIfNeeded];
     [self setupAutolayoutConstraints];
+    [self setupKeyboardManager];
+
+    self.estimatedRowHeights = [[NSCache alloc] init];
 }
 
 - (void)attachSuggestionsTableViewIfNeeded
@@ -106,7 +110,8 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
         return;
     }
     
-    self.suggestionsTableView = [[SuggestionsTableView alloc] initWithSiteID:self.comment.blog.dotComID];
+    self.suggestionsTableView = [SuggestionsTableView new];
+    self.suggestionsTableView.siteID = self.comment.blog.dotComID;
     self.suggestionsTableView.suggestionsDelegate = self;
     [self.suggestionsTableView setTranslatesAutoresizingMaskIntoConstraints:NO];
     [self.view addSubview:self.suggestionsTableView];
@@ -128,6 +133,7 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     };
     replyTextView.delegate = self;
     self.replyTextView = replyTextView;
+
     [self.view addSubview:self.replyTextView];
 }
 
@@ -149,15 +155,15 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
                                                                       metrics:nil
                                                                         views:views]];
     if ([self shouldAttachReplyTextView]) {
-        views[@"replyTextView"] = self.replyTextView;
-        [self.view addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[tableView][replyTextView]|"
-                                                                          options:0
-                                                                          metrics:nil
-                                                                            views:views]];
-        [self.view addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[replyTextView]|"
-                                                                          options:0
-                                                                          metrics:nil
-                                                                            views:views]];
+        self.bottomLayoutConstraint = [self.view.bottomAnchor constraintEqualToAnchor:self.replyTextView.bottomAnchor];
+        self.bottomLayoutConstraint.active = YES;
+
+        [NSLayoutConstraint activateConstraints:@[
+            [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+            [self.replyTextView.topAnchor constraintEqualToAnchor:self.tableView.bottomAnchor],
+            [self.replyTextView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+            [self.replyTextView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        ]];
     }
     else {
         [self.view addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[tableView]|"
@@ -191,6 +197,14 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     }
 }
 
+- (void)setupKeyboardManager
+{
+    self.keyboardManager = [[KeyboardDismissHelper alloc] initWithParentView:self.view
+                                                                  scrollView:self.tableView
+                                                          dismissableControl:self.replyTextView
+                                                      bottomLayoutConstraint:self.bottomLayoutConstraint];
+}
+
 - (void)viewDidLoad
 {
     [super viewDidLoad];
@@ -204,20 +218,15 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 {
     [super viewWillAppear:animated];
 
-    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-    [nc addObserver:self selector:@selector(handleKeyboardWillShow:) name:UIKeyboardWillShowNotification object:nil];
-    [nc addObserver:self selector:@selector(handleKeyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
+    [self.keyboardManager startListeningToKeyboardNotifications];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
 {
     [super viewWillDisappear:animated];
 
-    [self.replyTextView resignFirstResponder];
-
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self.keyboardManager stopListeningToKeyboardNotifications];
 }
-
 
 #pragma mark - Fetching Post
 
@@ -269,6 +278,10 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     return cell;
 }
 
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [self.estimatedRowHeights setObject:@(cell.frame.size.height) forKey:indexPath];
+}
 
 #pragma mark - Table view delegate
 
@@ -283,40 +296,30 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
         }
 
         ReaderDetailViewController *vc = [ReaderDetailViewController controllerWithPostID:self.comment.postID siteID:self.comment.blog.dotComID];
-        [self.navigationController pushViewController:vc animated:YES];
+        [self.navigationController pushFullscreenViewController:vc animated:YES];
     }
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
+- (CGFloat)tableView:(UITableView *)tableView estimatedHeightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return [UIDevice isPad] ? UITableViewAutomaticDimension : CGFLOAT_MIN;
+    NSNumber *cachedHeight = [self.estimatedRowHeights objectForKey:indexPath];
+    if (cachedHeight.doubleValue) {
+        return cachedHeight.doubleValue;
+    }
+    return WPTableViewDefaultRowHeight;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    NSString *layoutIdentifier = self.layoutIdentifiersMap[@(indexPath.row)];
-    NSAssert(layoutIdentifier, @"Missing Layout Identifier!");
-    
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:layoutIdentifier];
-    NSAssert(cell, @"Missing layout cell!");
-    
-    [self setupCell:cell];
-    
-    return [cell layoutHeightWithWidth:CGRectGetWidth(self.tableView.bounds)];
+    return UITableViewAutomaticDimension;
 }
-
-- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
-{
-    return CGFLOAT_MIN;
-}
-
 
 #pragma mark - Setup Cells
 
 - (void)setupCell:(UITableViewCell *)cell
 {
     NSParameterAssert(cell);
-    
+
     // This is gonna look way better in Swift!
     if ([cell isKindOfClass:[NoteBlockHeaderTableViewCell class]]) {
         [self setupHeaderCell:(NoteBlockHeaderTableViewCell *)cell];
@@ -343,7 +346,7 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     separatorsView.bottomVisible = YES;
     
     // Setup the Gravatar if needed
-    if (cell.isLayoutCell == NO && [self.comment.post respondsToSelector:@selector(authorAvatarURL)]) {
+    if ([self.comment.post respondsToSelector:@selector(authorAvatarURL)]) {
         [cell downloadGravatarWithURL:[NSURL URLWithString:self.comment.post.authorAvatarURL]];
     }
 }
@@ -356,17 +359,15 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 
     // Setup the Fields
     cell.name = self.comment.author;
-    cell.timestamp = [self.comment.dateCreated shortString];
+    cell.timestamp = [self.comment.dateCreated mediumString];
     cell.site = self.comment.authorUrlForDisplay;
     cell.commentText = [self.comment contentForDisplay];
-    cell.isApproved = [self.comment.status isEqualToString:@"approve"];
-    
-    if (cell.isLayoutCell == NO) {
-        if ([self.comment avatarURLForDisplay]) {
-            [cell downloadGravatarWithURL:self.comment.avatarURLForDisplay];
-        } else {
-            [cell downloadGravatarWithGravatarEmail:[self.comment gravatarEmailForDisplay]];
-        }
+    cell.isApproved = [self.comment.status isEqualToString:CommentStatusApproved];
+
+    if ([self.comment avatarURLForDisplay]) {
+        [cell downloadGravatarWithURL:self.comment.avatarURLForDisplay];
+    } else {
+        [cell downloadGravatarWithEmail:[self.comment gravatarEmailForDisplay]];
     }
 
     // Setup the Callbacks
@@ -393,7 +394,7 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     cell.isTrashEnabled = YES;
     cell.isSpamEnabled = YES;
 
-    cell.isApproveOn = [self.comment.status isEqualToString:@"approve"];
+    cell.isApproveOn = [self.comment.status isEqualToString:CommentStatusApproved];
     cell.isLikeOn = self.comment.isLiked;
 
     // Setup the Callbacks
@@ -426,6 +427,10 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     cell.onSpamClick = ^(UIButton *sender){
         [weakSelf spamComment];
     };
+
+    cell.onEditClick = ^(UIButton *sender) {
+        [weakSelf editComment];
+    };
 }
 
 
@@ -450,6 +455,9 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 {
     __typeof(self) __weak weakSelf = self;
 
+    if (!self.comment.isLiked) {
+        [[UINotificationFeedbackGenerator new] notificationOccurred:UINotificationFeedbackTypeSuccess];
+    }
 
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     CommentService *commentService = [[CommentService alloc] initWithManagedObjectContext:context];
@@ -491,7 +499,6 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 {
     __typeof(self) __weak weakSelf = self;
     
-    // Show the alertView
     NSString *message = NSLocalizedString(@"Are you sure you want to delete this comment?",
                                           @"Message asking for confirmation on comment deletion");
     
@@ -692,52 +699,21 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 }
 
 
-#pragma mark - Keyboard Management
+#pragma mark - UIScrollViewDelegate
 
-- (void)handleKeyboardWillShow:(NSNotification *)notification
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
 {
-    NSDictionary* userInfo = notification.userInfo;
-
-    // Convert the rect to view coordinates: enforce the current orientation!
-    CGRect kbRect = [[userInfo objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
-    kbRect = [self.view convertRect:kbRect fromView:nil];
-
-    // Bottom Inset: Consider the tab bar!
-    CGRect viewFrame = self.view.frame;
-    CGFloat bottomInset = CGRectGetHeight(kbRect) - (CGRectGetMaxY(kbRect) - CGRectGetHeight(viewFrame));
-
-    [UIView beginAnimations:nil context:nil];
-    [UIView setAnimationDuration:[userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue]];
-    [UIView setAnimationCurve:[userInfo[UIKeyboardAnimationCurveUserInfoKey] intValue]];
-
-    [self.view updateConstraintWithFirstItem:self.view
-                                  secondItem:self.replyTextView
-                          firstItemAttribute:NSLayoutAttributeBottom
-                         secondItemAttribute:NSLayoutAttributeBottom
-                                    constant:bottomInset];
-
-    [self.view layoutIfNeeded];
-
-    [UIView commitAnimations];
+    [self.keyboardManager scrollViewWillBeginDragging:scrollView];
 }
 
-- (void)handleKeyboardWillHide:(NSNotification *)notification
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView
 {
-    NSDictionary* userInfo = notification.userInfo;
+    [self.keyboardManager scrollViewDidScroll:scrollView];
+}
 
-    [UIView beginAnimations:nil context:nil];
-    [UIView setAnimationDuration:[userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue]];
-    [UIView setAnimationCurve:[userInfo[UIKeyboardAnimationCurveUserInfoKey] intValue]];
-
-    [self.view updateConstraintWithFirstItem:self.view
-                                  secondItem:self.replyTextView
-                          firstItemAttribute:NSLayoutAttributeBottom
-                         secondItemAttribute:NSLayoutAttributeBottom
-                                    constant:0];
-
-    [self.view layoutIfNeeded];
-
-    [UIView commitAnimations];
+- (void)scrollViewWillEndDragging:(UIScrollView *)scrollView withVelocity:(CGPoint)velocity targetContentOffset:(inout CGPoint *)targetContentOffset
+{
+    [self.keyboardManager scrollViewWillEndDragging:scrollView withVelocity:velocity];
 }
 
 
@@ -809,13 +785,7 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
         @(self.rowNumberForComment)   : NoteBlockCommentTableViewCell.reuseIdentifier,
         @(self.rowNumberForActions)   : NoteBlockActionsTableViewCell.reuseIdentifier,
     };
-    
-    self.layoutIdentifiersMap = @{
-        @(self.rowNumberForHeader)    : NoteBlockHeaderTableViewCell.layoutIdentifier,
-        @(self.rowNumberForComment)   : NoteBlockCommentTableViewCell.layoutIdentifier,
-        @(self.rowNumberForActions)   : NoteBlockActionsTableViewCell.layoutIdentifier,
-    };
-    
+
     // Reload the table, at last!
     [self.tableView reloadData];
 }

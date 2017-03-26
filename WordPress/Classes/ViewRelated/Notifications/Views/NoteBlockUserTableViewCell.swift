@@ -1,32 +1,32 @@
 import Foundation
 import WordPressShared
 
-@objc public class NoteBlockUserTableViewCell : NoteBlockTableViewCell
-{
-    public typealias EventHandler = (() -> Void)
-    
+
+class NoteBlockUserTableViewCell: NoteBlockTableViewCell {
+    typealias EventHandler = (() -> Void)
+
     // MARK: - Public Properties
-    public var onFollowClick:      EventHandler?
-    public var onUnfollowClick:    EventHandler?
-    
-    public var isFollowEnabled: Bool {
+    var onFollowClick: EventHandler?
+    var onUnfollowClick: EventHandler?
+
+    var isFollowEnabled: Bool {
         set {
-            btnFollow.hidden = !newValue
+            btnFollow.isHidden = !newValue
         }
         get {
-            return !btnFollow.hidden
+            return !btnFollow.isHidden
         }
     }
-    public var isFollowOn: Bool {
+    var isFollowOn: Bool {
         set {
-            btnFollow.selected = newValue
+            btnFollow.isSelected = newValue
         }
         get {
-            return btnFollow.selected
+            return btnFollow.isSelected
         }
     }
-    
-    public var name: String? {
+
+    var name: String? {
         set {
             nameLabel.text  = newValue
         }
@@ -34,7 +34,7 @@ import WordPressShared
             return nameLabel.text
         }
     }
-    public var blogTitle: String? {
+    var blogTitle: String? {
         set {
             blogLabel.text  = newValue
         }
@@ -42,9 +42,9 @@ import WordPressShared
             return blogLabel.text
         }
     }
-    
+
     // MARK: - Public Methods
-    public func downloadGravatarWithURL(url: NSURL?) {
+    func downloadGravatarWithURL(_ url: URL?) {
         if url == gravatarURL {
             return
         }
@@ -52,50 +52,41 @@ import WordPressShared
         let placeholderImage = WPStyleGuide.Notifications.gravatarPlaceholderImage
         let gravatar = url.flatMap { Gravatar($0) }
         gravatarImageView.downloadGravatar(gravatar, placeholder: placeholderImage, animate: true)
-        
+
         gravatarURL = url
     }
-    
+
     // MARK: - View Methods
-    public override func awakeFromNib() {
+    override func awakeFromNib() {
         super.awakeFromNib()
 
-        WPStyleGuide.configureFollowButton(btnFollow)
-        btnFollow.titleLabel?.font          = WPStyleGuide.Notifications.blockRegularFont
+        WPStyleGuide.configureFollow(btnFollow)
+        btnFollow.titleLabel?.font = WPStyleGuide.Notifications.blockRegularFont
 
-        backgroundColor                     = WPStyleGuide.Notifications.blockBackgroundColor
-        accessoryType                       = .None
-        contentView.autoresizingMask        = [.FlexibleHeight, .FlexibleWidth]
-        
-        nameLabel.font                      = WPStyleGuide.Notifications.blockBoldFont
-        nameLabel.textColor                 = WPStyleGuide.Notifications.blockTextColor
-        
-        blogLabel.font                      = WPStyleGuide.Notifications.blockRegularFont
-        blogLabel.textColor                 = WPStyleGuide.Notifications.blockSubtitleColor
-        blogLabel.adjustsFontSizeToFitWidth = false;
-        
-        // iPad: Use a bigger image size!
-        if UIDevice.isPad() {
-            gravatarImageView.updateConstraint(.Height, constant: gravatarImageSizePad.width)
-            gravatarImageView.updateConstraint(.Width,  constant: gravatarImageSizePad.height)
-        }
+        backgroundColor = WPStyleGuide.Notifications.blockBackgroundColor
+
+        nameLabel.font = WPStyleGuide.Notifications.blockBoldFont
+        nameLabel.textColor = WPStyleGuide.Notifications.blockTextColor
+
+        blogLabel.font = WPStyleGuide.Notifications.blockRegularFont
+        blogLabel.textColor = WPStyleGuide.Notifications.blockSubtitleColor
+        blogLabel.adjustsFontSizeToFitWidth = false
     }
-    
+
     // MARK: - IBActions
-    @IBAction public func followWasPressed(sender: AnyObject) {
+    @IBAction func followWasPressed(_ sender: AnyObject) {
         if let listener = isFollowOn ? onUnfollowClick : onFollowClick {
             listener()
         }
         isFollowOn = !isFollowOn
     }
-    
+
     // MARK: - Private
-    private let gravatarImageSizePad:               CGSize = CGSize(width: 54.0, height: 54.0)
-    private var gravatarURL:                        NSURL?
-    
+    fileprivate var gravatarURL: URL?
+
     // MARK: - IBOutlets
-    @IBOutlet private weak var nameLabel:           UILabel!
-    @IBOutlet private weak var blogLabel:           UILabel!
-    @IBOutlet private weak var btnFollow:           UIButton!
-    @IBOutlet private weak var gravatarImageView:   CircularImageView!
+    @IBOutlet fileprivate weak var nameLabel: UILabel!
+    @IBOutlet fileprivate weak var blogLabel: UILabel!
+    @IBOutlet fileprivate weak var btnFollow: UIButton!
+    @IBOutlet fileprivate weak var gravatarImageView: CircularImageView!
 }

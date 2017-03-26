@@ -1,8 +1,9 @@
+
 import Foundation
 
-@objc public class JSONLoader : NSObject {
+@objc open class JSONLoader: NSObject {
     public typealias JSONDictionary = Dictionary<String, AnyObject>
-    
+
     /**
     *  @brief      Loads the specified json file name and returns a dictionary representing it.
     *
@@ -10,17 +11,17 @@ import Foundation
     *
     *  @returns    A dictionary representing the contents of the json file.
     */
-    public func loadFileWithName(name : String, type : String) -> JSONDictionary? {
-        
-        let path = NSBundle(forClass: self.dynamicType).pathForResource(name, ofType: type)
-        
+    open func loadFile(_ name: String, type: String) -> JSONDictionary? {
+
+        let path = Bundle(for: type(of: self)).path(forResource: name, ofType: type)
+
         if let unwrappedPath = path {
-            return loadFileWithPath(unwrappedPath)
+            return loadFile(unwrappedPath)
         } else {
             return nil
         }
     }
-    
+
     /**
      *  @brief      Loads the specified json file name and returns a dictionary representing it.
      *
@@ -28,23 +29,23 @@ import Foundation
      *
      *  @returns    A dictionary representing the contents of the json file.
      */
-    public func loadFileWithPath(path : String) -> JSONDictionary? {
-        
-        if let contents = NSData(contentsOfFile: path) {
+    open func loadFile(_ path: String) -> JSONDictionary? {
+
+        if let contents = try? Data(contentsOf: URL(fileURLWithPath: path)) {
             return parseData(contents)
         }
-        
+
         return nil
     }
 
-    private func parseData(data : NSData) -> JSONDictionary? {
-        let options : NSJSONReadingOptions = [.MutableContainers , .MutableLeaves];
-        
+    fileprivate func parseData(_ data: Data) -> JSONDictionary? {
+        let options: JSONSerialization.ReadingOptions = [.mutableContainers , .mutableLeaves]
+
         do {
-            let parseResult : AnyObject = try NSJSONSerialization.JSONObjectWithData(data, options: options)
+            let parseResult = try JSONSerialization.jsonObject(with: data as Data, options: options)
             return parseResult as? JSONDictionary
         } catch {
-            return nil;
+            return nil
         }
     }
 }

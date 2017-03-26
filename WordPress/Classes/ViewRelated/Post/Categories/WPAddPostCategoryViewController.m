@@ -1,6 +1,5 @@
 #import "WPAddPostCategoryViewController.h"
 #import "Blog.h"
-#import "Post.h"
 #import "PostCategory.h"
 #import "PostCategoriesViewController.h"
 #import "Constants.h"
@@ -14,7 +13,7 @@
 
 static const CGFloat HorizontalMargin = 15.0f;
 
-@interface WPAddPostCategoryViewController ()<PostCategoriesViewControllerDelegate>
+@interface WPAddPostCategoryViewController ()<PostCategoriesViewControllerDelegate, UITextFieldDelegate>
 
 @property (nonatomic, strong) PostCategory *parentCategory;
 @property (nonatomic, strong) Blog *blog;
@@ -52,7 +51,6 @@ static const CGFloat HorizontalMargin = 15.0f;
 
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
                                                                                           target:self action:@selector(dismiss:)];
-    [WPStyleGuide resetReadableMarginsForTableView:self.tableView];
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
 }
 
@@ -114,18 +112,20 @@ static const CGFloat HorizontalMargin = 15.0f;
                                         [self removeProgressIndicator];
                                         [self dismissWithCategory:category];
                                     } failure:^(NSError *error) {
-                                        [self removeProgressIndicator];
+                                        dispatch_async(dispatch_get_main_queue(), ^{
+                                            [self removeProgressIndicator];
 
-                                        if ([error code] == 403) {
-                                            [WPError showAlertWithTitle:NSLocalizedString(@"Couldn't Connect", @"") message:NSLocalizedString(@"The username or password stored in the app may be out of date. Please re-enter your password in the settings and try again.", @"") withSupportButton:NO];
+                                            if ([error code] == 403) {
+                                                [WPError showAlertWithTitle:NSLocalizedString(@"Couldn't Connect", @"") message:NSLocalizedString(@"The username or password stored in the app may be out of date. Please re-enter your password in the settings and try again.", @"") withSupportButton:NO];
 
-                                            // bad login/pass combination
-                                            SiteSettingsViewController *editSiteViewController = [[SiteSettingsViewController alloc] initWithBlog:self.blog];
-                                            [self.navigationController pushViewController:editSiteViewController animated:YES];
+                                                // bad login/pass combination
+                                                SiteSettingsViewController *editSiteViewController = [[SiteSettingsViewController alloc] initWithBlog:self.blog];
+                                                [self.navigationController pushViewController:editSiteViewController animated:YES];
 
-                                        } else {
-                                            [WPError showXMLRPCErrorAlert:error];
-                                        }
+                                            } else {
+                                                [WPError showXMLRPCErrorAlert:error];
+                                            }
+                                        });
                                     }];
 }
 
@@ -145,7 +145,11 @@ static const CGFloat HorizontalMargin = 15.0f;
 
 - (void)showParentCategorySelector
 {
-    PostCategoriesViewController *controller = [[PostCategoriesViewController alloc] initWithBlog:self.blog currentSelection:nil selectionMode:CategoriesSelectionModeParent];
+    NSArray<PostCategory*>* currentSelection = self.parentCategory ? @[self.parentCategory] : nil;
+    
+    PostCategoriesViewController *controller = [[PostCategoriesViewController alloc] initWithBlog:self.blog
+                                                                                 currentSelection:currentSelection
+                                                                                    selectionMode:CategoriesSelectionModeParent];
     controller.delegate = self;
     [self.navigationController pushViewController:controller animated:YES];
 }
@@ -190,6 +194,7 @@ static const CGFloat HorizontalMargin = 15.0f;
     self.categoryTextField.keyboardType = UIKeyboardTypeDefault;
     self.categoryTextField.secureTextEntry = NO;
     self.categoryTextField.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    self.categoryTextField.delegate = self;
 
     [_createCategoryCell.contentView addSubview:self.categoryTextField];
     

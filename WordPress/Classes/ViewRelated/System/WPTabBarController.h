@@ -16,12 +16,14 @@ typedef NS_ENUM(NSUInteger, WPTabType) {
 @class BlogListViewController;
 @class MeViewController;
 @class NotificationsViewController;
-@class ReaderViewController;
+@class ReaderMenuViewController;
+@class WPSplitViewController;
 
 @interface WPTabBarController : UITabBarController
 
+@property (nonatomic, strong, readonly) WPSplitViewController *blogListSplitViewController;
 @property (nonatomic, strong, readonly) BlogListViewController *blogListViewController;
-@property (nonatomic, strong, readonly) ReaderViewController *readerViewController;
+@property (nonatomic, strong, readonly) ReaderMenuViewController *readerMenuViewController;
 @property (nonatomic, strong, readonly) NotificationsViewController *notificationsViewController;
 @property (nonatomic, strong, readonly) MeViewController *meViewController;
 
@@ -34,9 +36,15 @@ typedef NS_ENUM(NSUInteger, WPTabType) {
 - (void)showReaderTab;
 - (void)showPostTab;
 - (void)showNotificationsTab;
+- (void)showPostTabAnimated:(BOOL)animated toMedia:(BOOL)openToMedia;
+- (void)showReaderTabForPost:(NSNumber *)postId onBlog:(NSNumber *)blogId;
+
+- (void)switchMySitesTabToAddNewSite;
 - (void)switchMySitesTabToStatsViewForBlog:(Blog *)blog;
-- (void)showPostTabWithOptions:(NSDictionary *)options;
+- (void)switchMySitesTabToCustomizeViewForBlog:(Blog *)blog;
+- (void)switchMySitesTabToThemesViewForBlog:(Blog *)blog;
 - (void)switchTabToPostsListForPost:(AbstractPost *)post;
+
 - (void)showNotificationsTabForNoteWithID:(NSString *)notificationID;
 - (void)updateNotificationBadgeVisibility;
 

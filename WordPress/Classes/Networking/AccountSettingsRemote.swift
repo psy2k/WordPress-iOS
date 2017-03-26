@@ -1,88 +1,127 @@
 import Foundation
 
-class AccountSettingsRemote: ServiceRemoteREST {
-    func getSettings(success success: AccountSettings -> Void, failure: ErrorType -> Void) {
+class AccountSettingsRemote: ServiceRemoteWordPressComREST {
+    static let remotes = NSMapTable<AnyObject, AnyObject>(keyOptions: NSPointerFunctions.Options(), valueOptions: NSPointerFunctions.Options.weakMemory)
+
+    /// Returns an AccountSettingsRemote with the given api, reusing a previous
+    /// remote if it exists.
+    static func remoteWithApi(_ api: WordPressComRestApi) -> AccountSettingsRemote {
+        // We're hashing on the authToken because we don't want duplicate api
+        // objects for the same account.
+        //
+        // In theory this would be taken care of by the fact that the api comes
+        // from a WPAccount, and since WPAccount is a managed object Core Data
+        // guarantees there's only one of it.
+        //
+        // However it might be possible that the account gets deallocated and
+        // when it's fetched again it would create a different api object.
+        // FIXME: not thread safe
+        // @koke 2016-01-21
+        if let remote = remotes.object(forKey: api) as? AccountSettingsRemote {
+            return remote
+        } else {
+            let remote = AccountSettingsRemote(wordPressComRestApi: api)!
+            remotes.setObject(remote, forKey: api)
+            return remote
+        }
+    }
+
+    func getSettings(success: @escaping (AccountSettings) -> Void, failure: @escaping (Error) -> Void) {
         let endpoint = "me/settings"
         let parameters = ["context": "edit"]
-        let path = pathForEndpoint(endpoint, withVersion: ServiceRemoteRESTApiVersion_1_1)
+        let path = self.path(forEndpoint: endpoint, with: .version_1_1)
 
-        api.GET(path,
-            parameters: parameters,
-            success: {
-                operation, responseObject in
+        wordPressComRestApi.GET(path!,
+                parameters: parameters as [String : AnyObject]?,
+                success: {
+                    responseObject, httpResponse in
 
-                do {
-                    let settings = try self.settingsFromResponse(responseObject)
-                    success(settings)
-                } catch {
-                    failure(error)
-                }
+                    do {
+                        let settings = try self.settingsFromResponse(responseObject)
+                        success(settings)
+                    } catch {
+                        failure(error)
+                    }
             },
-            failure: { operation, error in
-                failure(error)
+                failure: { error, httpResponse in
+                    failure(error)
         })
     }
 
-    func updateSetting(change: AccountSettingsChange, success: () -> Void, failure: ErrorType -> Void) {
+    func updateSetting(_ change: AccountSettingsChange, success: @escaping () -> Void, failure: @escaping (Error) -> Void) {
         let endpoint = "me/settings"
-        let path = pathForEndpoint(endpoint, withVersion: ServiceRemoteRESTApiVersion_1_1)
+        let path = self.path(forEndpoint: endpoint, with: .version_1_1)
         let parameters = [fieldNameForChange(change): change.stringValue]
 
-        api.POST(path,
-            parameters: parameters,
+        wordPressComRestApi.POST(path!,
+            parameters: parameters as [String : AnyObject]?,
             success: {
-                operation, responseObject in
+                responseObject, httpResponse in
 
                 success()
             },
-            failure: { operation, error in
+            failure: { error, httpResponse in
                 failure(error)
         })
     }
 
-    private func settingsFromResponse(responseObject: AnyObject) throws -> AccountSettings {
+    fileprivate func settingsFromResponse(_ responseObject: AnyObject) throws -> AccountSettings {
         guard let
             response = responseObject as? [String: AnyObject],
-            firstName = response["first_name"] as? String,
-            lastName = response["last_name"] as? String,
-            displayName = response["display_name"] as? String,
-            aboutMe = response["description"] as? String,
-            username = response["user_login"] as? String,
-            email = response["user_email"] as? String,
-            primarySiteID = response["primary_site_ID"] as? Int,
-            webAddress = response["user_URL"] as? String,
-            language = response["language"] as? String else {
+            let firstName = response["first_name"] as? String,
+            let lastName = response["last_name"] as? String,
+            let displayName = response["display_name"] as? String,
+            let aboutMe = response["description"] as? String,
+            let username = response["user_login"] as? String,
+            let email = response["user_email"] as? String,
+            let emailPendingAddress = response["new_user_email"] as? String?,
+            let emailPendingChange = response["user_email_change_pending"] as? Bool,
+            let primarySiteID = response["primary_site_ID"] as? Int,
+            let webAddress = response["user_URL"] as? String,
+            let language = response["language"] as? String else {
                 DDLogSwift.logError("Error decoding me/settings response: \(responseObject)")
-                throw Error.DecodeError
+                throw ResponseError.decodingFailure
         }
 
         let aboutMeText = aboutMe.stringByDecodingXMLCharacters()
 
-        return AccountSettings(firstName: firstName, lastName: lastName, displayName: displayName, aboutMe: aboutMeText, username: username, email: email, primarySiteID: primarySiteID, webAddress: webAddress, language: language)
+        return AccountSettings(firstName: firstName,
+                               lastName: lastName,
+                               displayName: displayName,
+                               aboutMe: aboutMeText,
+                               username: username,
+                               email: email,
+                               emailPendingAddress: emailPendingAddress,
+                               emailPendingChange: emailPendingChange,
+                               primarySiteID: primarySiteID,
+                               webAddress: webAddress,
+                               language: language)
     }
 
-    private func fieldNameForChange(change: AccountSettingsChange) -> String {
+    fileprivate func fieldNameForChange(_ change: AccountSettingsChange) -> String {
         switch change {
-        case .FirstName(_):
+        case .firstName(_):
             return "first_name"
-        case .LastName(_):
+        case .lastName(_):
             return "last_name"
-        case .DisplayName(_):
+        case .displayName(_):
             return "display_name"
-        case .AboutMe(_):
+        case .aboutMe(_):
             return "description"
-        case .Email(_):
-            return "email"
-        case .PrimarySite(_):
+        case .email(_):
+            return "user_email"
+        case .emailRevertPendingChange(_):
+            return "user_email_change_pending"
+        case .primarySite(_):
             return "primary_site_ID"
-        case .WebAddress(_):
+        case .webAddress(_):
             return "user_URL"
-        case .Language(_):
+        case .language(_):
             return "language"
         }
     }
-    
-    enum Error: ErrorType {
-        case DecodeError
+
+    enum ResponseError: Error {
+        case decodingFailure
     }
 }

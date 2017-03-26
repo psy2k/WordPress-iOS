@@ -56,7 +56,7 @@
     if ([blog.options numberForKeyPath:@"blog_title.readonly"]) {
         blog.isAdmin = ![[blog.options numberForKeyPath:@"blog_title.readonly"] boolValue];
     }
-    [[ContextManager sharedInstance] saveContext:context];
+    [[ContextManager sharedInstance] saveContextAndWait:context];
 
     if (blog.jetpack.isInstalled) {
         if (blog.jetpack.isConnected) {
@@ -80,7 +80,7 @@
     }
 
     WP3DTouchShortcutCreator *shortcutCreator = [WP3DTouchShortcutCreator new];
-    [shortcutCreator createShortcuts:YES];
+    [shortcutCreator createShortcutsIf3DTouchAvailable:YES];
     
     [WPAnalytics track:WPAnalyticsStatAddedSelfHostedSite];
     [WPAnalytics track:WPAnalyticsStatSignedIn withProperties:@{ @"dotcom_user" : @(NO) }];

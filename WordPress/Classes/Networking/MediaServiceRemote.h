@@ -9,9 +9,31 @@
                success:(void (^)(RemoteMedia *remoteMedia))success
                failure:(void (^)(NSError *error))failure;
 
-- (void)createMedia:(RemoteMedia *)media
+- (void)uploadMedia:(RemoteMedia *)media
            progress:(NSProgress **)progress
             success:(void (^)(RemoteMedia *remoteMedia))success
+            failure:(void (^)(NSError *error))failure;
+
+/**
+ *  Update media details on the server
+ *
+ *  @param media   the media object to update
+ *  @param success a block to be executed when the request finishes with success.
+ *  @param failure a block to be executed when the request fails.
+ */
+- (void)updateMedia:(RemoteMedia *)media
+            success:(void (^)(RemoteMedia *remoteMedia))success
+            failure:(void (^)(NSError *error))failure;
+
+/**
+ *  Delete media from the server. Note the media is deleted, not trashed.
+ *
+ *  @param media   the media object to delete
+ *  @param success a block to be executed when the request finishes with success.
+ *  @param failure a block to be executed when the request fails.
+ */
+- (void)deleteMedia:(RemoteMedia *)media
+            success:(void (^)())success
             failure:(void (^)(NSError *error))failure;
 
 /**

@@ -48,6 +48,21 @@ extern NSString * const ReaderPostServiceErrorDomain;
                    failure:(void (^)(NSError *error))failure;
 
 /**
+ Fetches and saves the posts for the specified topic
+
+ @param topic The Topic for which to request posts.
+ @param offset The offset of the posts to fetch.
+ @param deletingEarlier Deletes any cached posts earlier than the earliers post returned.
+ @param success block called on a successful fetch.
+ @param failure block called if there is any error. `error` can be any underlying network error.
+ */
+- (void)fetchPostsForTopic:(ReaderAbstractTopic *)topic
+                  atOffset:(NSUInteger)offset
+           deletingEarlier:(BOOL)deleteEarlier
+                   success:(void (^)(NSInteger count, BOOL hasMore))success
+                   failure:(void (^)(NSError *error))failure;
+
+/**
  Fetches a specific post from the specified remote site
 
  @param postID The ID of the post to fetch.
@@ -60,6 +75,13 @@ extern NSString * const ReaderPostServiceErrorDomain;
           success:(void (^)(ReaderPost *post))success
           failure:(void (^)(NSError *error))failure;
 
+
+/**
+ Silently refresh posts for the followed sites topic.
+ Note that calling this method creates a new service instance that performs
+ all its work on a derived managed object context, and background queue.
+ */
+- (void)refreshPostsForFollowedTopic;
 
 /**
  Toggle the liked status of the specified post.
@@ -88,6 +110,11 @@ extern NSString * const ReaderPostServiceErrorDomain;
  Saves the NSManagedObjectContext.
  */
 - (void)deletePostsWithNoTopic;
+
+/**
+ Globally sets the `inUse` flag to fall for all posts.
+ */
+- (void)clearInUseFlags;
 
 /**
  Delete posts from the specified site/feed from the specified topic

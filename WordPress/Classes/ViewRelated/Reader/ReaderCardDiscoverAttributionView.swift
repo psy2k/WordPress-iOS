@@ -1,58 +1,88 @@
 import Foundation
 import WordPressShared
 
-@objc public class ReaderCardDiscoverAttributionView: UIView
-{
-    @IBOutlet private weak var imageView: CircularImageView!
-    @IBOutlet private(set) public weak var richTextView: RichTextView!
+@objc public protocol ReaderCardDiscoverAttributionViewDelegate: NSObjectProtocol {
+    func attributionActionSelectedForVisitingSite(_ view: ReaderCardDiscoverAttributionView)
+}
 
-    private let gravatarImageName = "gravatar"
-    private let blavatarImageName = "post-blavatar-placeholder"
+private enum ReaderCardDiscoverAttribution: Int {
+
+    case none // Default, no action
+    case visitSite // Action for verbose attribution to visit a site
+}
+
+@objc open class ReaderCardDiscoverAttributionView: UIView {
+    fileprivate let gravatarImageName = "gravatar"
+    fileprivate let blavatarImageName = "post-blavatar-placeholder"
+
+    @IBOutlet fileprivate weak var imageView: CircularImageView!
+    @IBOutlet fileprivate weak var textLabel: UILabel!
+
+    fileprivate lazy var originalAttributionParagraphAttributes: [AnyHashable: Any] = {
+        return WPStyleGuide.originalAttributionParagraphAttributes()
+    }()
+
+    fileprivate var attributionAction: ReaderCardDiscoverAttribution = .none {
+        didSet {
+            // Enable/disable userInteraction on self if we allow an action.
+            self.isUserInteractionEnabled = attributionAction != .none
+        }
+    }
+
+    weak var delegate: ReaderCardDiscoverAttributionViewDelegate?
 
 
     // MARK: - Lifecycle Methods
 
-    public override func awakeFromNib() {
+    open override func awakeFromNib() {
         super.awakeFromNib()
-        richTextView.scrollsToTop = false
-    }
 
+        // Add a tap gesture for detecting a tap on the label and acting on the current attributionAction.
+        //// Ideally this would have independent tappable links but this adds a bit of overrhead for text/link detection
+        //// on a UILabel. We might consider migrating to somethnig lik TTTAttributedLabel for more discrete link
+        //// detection via UILabel.
+        //// Also, rather than detecting a tap on the whole view, we add it to the label and imageView specifically,
+        //// to avoid accepting taps outside of the label's text content, on display.
+        //// Brent C. Aug/23/2016
+        let selector = #selector(ReaderCardDiscoverAttributionView.textLabelTapGesture(_:))
+        let labelTap = UITapGestureRecognizer(target: self, action: selector)
+        textLabel.addGestureRecognizer(labelTap)
 
-    // MARK: - Accessors
+        // Also add a tap recognizer on the imageView.
+        let imageTap = UITapGestureRecognizer(target: self, action: selector)
+        imageView.addGestureRecognizer(imageTap)
 
-    public override func intrinsicContentSize() -> CGSize {
-        if richTextView.textStorage.length == 0 {
-            return super.intrinsicContentSize()
-        }
-        return sizeThatFits(frame.size)
-    }
+        // Enable userInteraction on the label/imageView by default while userInteraction
+        // is toggled on self in attributionAction: didSet for valid actions.
+        textLabel.isUserInteractionEnabled = true
+        imageView.isUserInteractionEnabled = true
 
-    public override func sizeThatFits(size: CGSize) -> CGSize {
-        let adjustedWidth = size.width - richTextView.frame.minX
-        let adjustedSize = CGSize(width: adjustedWidth, height: CGFloat.max)
-        var height = richTextView.sizeThatFits(adjustedSize).height
-        height = max(height, imageView.frame.maxY)
-
-        return CGSize(width: size.width, height: height)
+        applyOpaqueBackgroundColors()
     }
 
 
     // MARK: - Configuration
 
-    public func configureView(contentProvider: ReaderPostContentProvider?) {
-        if contentProvider?.sourceAttributionStyle() == SourceAttributionStyle.Post {
+    /**
+     Applies opaque backgroundColors to all subViews to avoid blending, for optimized drawing.
+     */
+    fileprivate func applyOpaqueBackgroundColors() {
+        imageView.backgroundColor = UIColor.white
+        textLabel.backgroundColor = UIColor.white
+    }
+
+    open func configureView(_ contentProvider: ReaderPostContentProvider?) {
+        if contentProvider?.sourceAttributionStyle() == SourceAttributionStyle.post {
             configurePostAttribution(contentProvider!)
-        } else if contentProvider?.sourceAttributionStyle() == SourceAttributionStyle.Site {
+        } else if contentProvider?.sourceAttributionStyle() == SourceAttributionStyle.site {
             configureSiteAttribution(contentProvider!, verboseAttribution: false)
         } else {
             reset()
         }
-
-        invalidateIntrinsicContentSize()
     }
 
 
-    public func configureViewWithVerboseSiteAttribution(contentProvider: ReaderPostContentProvider?) {
+    open func configureViewWithVerboseSiteAttribution(_ contentProvider: ReaderPostContentProvider?) {
         if let contentProvider = contentProvider {
             configureSiteAttribution(contentProvider, verboseAttribution: true)
         } else {
@@ -61,24 +91,51 @@ import WordPressShared
     }
 
 
-    private func reset() {
+    fileprivate func reset() {
         imageView.image = nil
-        richTextView.attributedText = nil
+        textLabel.attributedText = nil
+        attributionAction = .none
     }
 
-    private func configurePostAttribution(contentProvider: ReaderPostContentProvider) {
+
+    fileprivate func configurePostAttribution(_ contentProvider: ReaderPostContentProvider) {
         let url = contentProvider.sourceAvatarURLForDisplay()
         let placeholder = UIImage(named: gravatarImageName)
-        imageView.setImageWithURL(url, placeholderImage: placeholder)
+        imageView.setImageWith(url!, placeholderImage: placeholder)
         imageView.shouldRoundCorners = true
 
         let str = stringForPostAttribution(contentProvider.sourceAuthorNameForDisplay(),
                                             blogName: contentProvider.sourceBlogNameForDisplay())
-        let attributes = WPStyleGuide.originalAttributionParagraphAttributes()
-        richTextView.attributedText = NSAttributedString(string: str, attributes: attributes)
+        let attributes = originalAttributionParagraphAttributes as! [String: AnyObject]
+        textLabel.textColor = WPStyleGuide.grey()
+        textLabel.attributedText = NSAttributedString(string: str, attributes: attributes)
+        attributionAction = .none
     }
 
-    private func stringForPostAttribution(authorName: String?, blogName: String?) -> String {
+
+    fileprivate func configureSiteAttribution(_ contentProvider: ReaderPostContentProvider, verboseAttribution verbose: Bool) {
+        let url = contentProvider.sourceAvatarURLForDisplay()
+        let placeholder = UIImage(named: blavatarImageName)
+        imageView.setImageWith(url!, placeholderImage: placeholder)
+        imageView.shouldRoundCorners = false
+
+        let blogName = contentProvider.sourceBlogNameForDisplay()
+        let pattern = patternForSiteAttribution(verbose)
+        let str = String(format: pattern, blogName!)
+
+        let range = (str as NSString).range(of: blogName!)
+        let font = WPFontManager.systemItalicFont(ofSize: WPStyleGuide.originalAttributionFontSize())
+        let attributes = originalAttributionParagraphAttributes as! [String: AnyObject]
+        let attributedString = NSMutableAttributedString(string: str, attributes: attributes)
+        attributedString.addAttribute(NSFontAttributeName, value: font, range: range)
+        textLabel.textColor = WPStyleGuide.mediumBlue()
+        textLabel.highlightedTextColor = WPStyleGuide.lightBlue()
+        textLabel.attributedText = attributedString
+        attributionAction = .visitSite
+    }
+
+
+    fileprivate func stringForPostAttribution(_ authorName: String?, blogName: String?) -> String {
         var str = ""
         if (authorName != nil) && (blogName != nil) {
             let pattern = NSLocalizedString("Originally posted by %@ on %@",
@@ -95,38 +152,75 @@ import WordPressShared
                 comment: "Used to attribute a post back to its original blog.  The '%@' characters are a placholder for the blog name.")
             str = String(format: pattern, blogName!)
         }
-
         return str
     }
 
-    private func patternForSiteAttribution(verbose: Bool) -> String {
+
+    fileprivate func patternForSiteAttribution(_ verbose: Bool) -> String {
         var pattern: String
         if verbose {
-            pattern = NSLocalizedString("Visit %@ for more", comment:"A call to action to visit the specified blog.  The '%@' characters are a placholder for the blog name.")
+            pattern = NSLocalizedString("Visit %@ for more", comment: "A call to action to visit the specified blog.  The '%@' characters are a placholder for the blog name.")
         } else {
-            pattern = NSLocalizedString("Visit %@", comment:"A call to action to visit the specified blog.  The '%@' characters are a placholder for the blog name.")
+            pattern = NSLocalizedString("Visit %@", comment: "A call to action to visit the specified blog.  The '%@' characters are a placholder for the blog name.")
         }
         return pattern
     }
 
-    private func configureSiteAttribution(contentProvider: ReaderPostContentProvider, verboseAttribution verbose:Bool) {
-        let url = contentProvider.sourceAvatarURLForDisplay()
-        let placeholder = UIImage(named: blavatarImageName)
-        imageView.setImageWithURL(url, placeholderImage: placeholder)
-        imageView.shouldRoundCorners = false
 
-        let blogName = contentProvider.sourceBlogNameForDisplay()
-        let pattern = patternForSiteAttribution(verbose)
-        let str = String(format: pattern, blogName)
+    // MARK: - Touches
 
-        let range = (str as NSString).rangeOfString(blogName)
-        let font = WPFontManager.openSansItalicFontOfSize(WPStyleGuide.originalAttributionFontSize())
-        let attributes = WPStyleGuide.siteAttributionParagraphAttributes()
-        let attributedString = NSMutableAttributedString(string: str, attributes: attributes)
-        attributedString.addAttribute(NSFontAttributeName, value: font, range: range)
-        attributedString.addAttribute(NSLinkAttributeName, value: "http://wordpress.com/", range: NSMakeRange(0, str.characters.count))
-
-        richTextView.attributedText = attributedString
+    open override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        // Add highlight if the touch begins inside of the textLabel's frame
+        guard let touch: UITouch = event?.allTouches?.first else {
+            return
+        }
+        if textLabel.bounds.contains(touch.location(in: textLabel)) {
+            textLabel.isHighlighted = true
+        }
     }
 
+
+    open override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesMoved(touches, with: event)
+        // Remove highlight if the touch moves outside of the textLabel's frame
+        guard textLabel.isHighlighted else {
+            return
+        }
+        guard let touch: UITouch = event?.allTouches?.first else {
+            return
+        }
+        if !textLabel.bounds.contains(touch.location(in: textLabel)) {
+            textLabel.isHighlighted = false
+        }
+    }
+
+
+    open override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        guard textLabel.isHighlighted else {
+            return
+        }
+        textLabel.isHighlighted = false
+    }
+
+
+    open override func touchesCancelled(_ touches: Set<UITouch>?, with event: UIEvent?) {
+        super.touchesCancelled(touches!, with: event)
+        guard textLabel.isHighlighted else {
+            return
+        }
+        textLabel.isHighlighted = false
+    }
+
+
+    // MARK: - Actions
+
+    @objc open func textLabelTapGesture(_ gesture: UITapGestureRecognizer) {
+        switch attributionAction {
+        case .visitSite:
+            delegate?.attributionActionSelectedForVisitingSite(self)
+        default: break
+        }
+    }
 }

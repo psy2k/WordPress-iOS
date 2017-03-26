@@ -12,8 +12,6 @@ typedef enum
 }
 WPPostViewControllerMode;
 
-extern const CGRect NavigationBarButtonRect;
-
 extern NSString* const WPEditorNavigationRestorationID;
 extern NSString* const kUserDefaultsNewEditorEnabled;
 
@@ -24,18 +22,18 @@ extern NSString* const WPPostViewControllerOptionNotAnimated;
 extern NSString* const kWPEditorConfigURLParamAvailable;
 extern NSString* const kWPEditorConfigURLParamEnabled;
 
-@interface WPPostViewController : WPEditorViewController <UINavigationControllerDelegate, WPEditorViewControllerDelegate>
+@interface WPPostViewController : WPEditorViewController <UINavigationControllerDelegate, WPEditorViewControllerDelegate, UIViewControllerRestoration>
 
 /*
  EditPostViewController instance will execute the onClose callback, if provided, whenever the UI is dismissed.
  */
-typedef void (^EditPostCompletionHandler)(void);
-@property (nonatomic, copy, readwrite) EditPostCompletionHandler onClose;
+typedef void (^WPPostViewCompletionHandler)(WPPostViewController* viewController, BOOL saved);
+@property (nonatomic, copy, readwrite) WPPostViewCompletionHandler onClose;
 
 #pragma mark - Properties: Post
 
 /**
- *  @brief      Wether this VC owns the post or not.
+ *  @brief      Whether this VC owns the post or not.
  *  @details    This is set to YES when this VC is initialized with one of the draft post creation
  *              initializers.  It means this VC will delete the post objects if changes are
  *              discarded by the user.
@@ -46,6 +44,11 @@ typedef void (^EditPostCompletionHandler)(void);
  *  @brief      The post that's being displayed by this VC.
  */
 @property (nonatomic, strong) AbstractPost *post;
+
+/**
+ *  @brief      Whether the editor should open directly to the media picker.
+ */
+@property (nonatomic) BOOL isOpenedDirectlyForPhotoPost;
 
 #pragma mark - Properties: Misc
 
@@ -105,46 +108,6 @@ typedef void (^EditPostCompletionHandler)(void);
          andContent:(NSString *)content
             andTags:(NSString *)tags
            andImage:(NSString *)image;
-
-
-#pragma mark - Visual editor in settings
-
-/**
- *	@brief		Check if the new editor is available in the app settings.
- *
- *	@return		YES if the new editor is available in the app settings, NO otherwise.
- */
-+ (BOOL)isNewEditorAvailable;
-
-/**
- *	@brief		Check if the new editor is enabled.
- *
- *	@return		YES if the new editor is enabled, NO otherwise.
- */
-+ (BOOL)isNewEditorEnabled;
-
-/**
- *  @brief      Makes sure the new editor is available.
- *
- *  @returns    YES if the editor was made available, NO otherwise.
- */
-+ (BOOL)makeNewEditorAvailable;
-
-/**
- *	@brief		Makes the new editor available in the app settings.
- *	@details	This is set to NO by default.
- *
- *	@param		isAvailable		YES means the new editor will be available in the app settings.
- */
-+ (void)setNewEditorAvailable:(BOOL)isAvailable;
-
-/**
- *	@brief		Enables the new editor.
- *	@details	This is set to NO by default.
- *
- *	@param		isAvailable		YES means the new editor will be enabled.
- */
-+ (void)setNewEditorEnabled:(BOOL)isEnabled;
 
 #pragma mark - Misc methods
 

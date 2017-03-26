@@ -6,26 +6,32 @@
 #import "TaxonomyServiceRemote.h"
 #import "TaxonomyServiceRemoteREST.h"
 #import "TaxonomyServiceRemoteXMLRPC.h"
+#import "RemoteTaxonomyPaging.h"
+
+NS_ASSUME_NONNULL_BEGIN
+
+@interface PostTagService ()
+
+@end
 
 @implementation PostTagService
 
 - (void)syncTagsForBlog:(Blog *)blog
-                success:(void (^)())success
-                failure:(void (^)(NSError *error))failure
+                success:(nullable void (^)())success
+                failure:(nullable void (^)(NSError *error))failure
 {
     id<TaxonomyServiceRemote> remote = [self remoteForBlog:blog];
-    NSManagedObjectID *blogID = blog.objectID;
+    NSManagedObjectID *blogObjectID = blog.objectID;
     [remote getTagsWithSuccess:^(NSArray <RemotePostTag *> *remoteTags) {
         [self.managedObjectContext performBlock:^{
-            
-            Blog *blog = (Blog *)[self.managedObjectContext existingObjectWithID:blogID error:nil];
-            if (!blog) {
+            NSError *error;
+            Blog *blog = (Blog *)[self.managedObjectContext existingObjectWithID:blogObjectID error:&error];
+            if (!blog || error) {
+                [self handleError:error forBlog:blog withFailure:failure];
                 return;
             }
             
-            NSArray *tags = [self tagsFromRemoteTags:remoteTags];
-            blog.tags = [NSSet setWithArray:tags];
-            
+            [self mergeTagsWithRemoteTags:remoteTags blog:blog];
             [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
             
             if (success) {
@@ -35,37 +41,132 @@
     } failure:failure];
 }
 
+- (void)syncTagsForBlog:(Blog *)blog
+                 number:(nullable NSNumber *)number
+                 offset:(nullable NSNumber *)offset
+                success:(nullable void (^)(NSArray <PostTag *> *tags))success
+                failure:(nullable void (^)(NSError *error))failure
+{
+    RemoteTaxonomyPaging *paging = [[RemoteTaxonomyPaging alloc] init];
+    paging.number = number ?: @(100);
+    paging.offset = offset ?: @(0);
+    
+    id<TaxonomyServiceRemote> remote = [self remoteForBlog:blog];
+    NSManagedObjectID *blogObjectID = blog.objectID;
+    [remote getTagsWithPaging:paging
+                      success:^(NSArray<RemotePostTag *> *remoteTags) {
+                          NSError *error;
+                          Blog *blog = (Blog *)[self.managedObjectContext existingObjectWithID:blogObjectID error:&error];
+                          if (!blog || error) {
+                              [self handleError:error forBlog:blog withFailure:failure];
+                              return;
+                          }
+                          
+                          NSArray *tags = [self mergeTagsWithRemoteTags:remoteTags blog:blog];
+                          [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
+                          
+                          if (success) {
+                              success(tags);
+                          }
+                      } failure:failure];
+}
+
+- (void)searchTagsWithName:(NSString *)nameQuery
+                      blog:(Blog *)blog
+                   success:(nullable void (^)(NSArray <PostTag *> *tags))success
+                   failure:(nullable void (^)(NSError *error))failure
+{
+    NSParameterAssert(nameQuery.length > 0);
+    id<TaxonomyServiceRemote> remote = [self remoteForBlog:blog];
+    NSManagedObjectID *blogObjectID = blog.objectID;
+    [remote searchTagsWithName:nameQuery
+                       success:^(NSArray<RemotePostTag *> *remoteTags) {
+                           NSError *error;
+                           Blog *blog = (Blog *)[self.managedObjectContext existingObjectWithID:blogObjectID error:&error];
+                           if (!blog || error) {
+                               [self handleError:error forBlog:blog withFailure:failure];
+                               return;
+                           }
+                           
+                           NSArray *tags = [self mergeTagsWithRemoteTags:remoteTags blog:blog];
+                           [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
+                           
+                           if (success) {
+                               success(tags);
+                           }
+                           
+                       } failure:failure];
+}
+
 #pragma mark - helpers
 
 - (id<TaxonomyServiceRemote>)remoteForBlog:(Blog *)blog {
-    if (blog.restApi) {
-        return [[TaxonomyServiceRemoteREST alloc] initWithApi:blog.restApi siteID:blog.dotComID];
-    } else {
-        return [[TaxonomyServiceRemoteXMLRPC alloc] initWithApi:blog.api username:blog.username password:blog.password];
+    if ([blog supports:BlogFeatureWPComRESTAPI]) {
+        if (blog.wordPressComRestApi) {
+            return [[TaxonomyServiceRemoteREST alloc] initWithWordPressComRestApi:blog.wordPressComRestApi siteID:blog.dotComID];
+        }
+    } else if (blog.xmlrpcApi) {
+        return [[TaxonomyServiceRemoteXMLRPC alloc] initWithApi:blog.xmlrpcApi username:blog.username password:blog.password];
     }
+    return nil;
 }
 
-- (NSArray <PostTag *> *)tagsFromRemoteTags:(NSArray<RemotePostTag *> *)remoteTags
+- (nullable NSArray <PostTag *> *)mergeTagsWithRemoteTags:(NSArray<RemotePostTag *> *)remoteTags
+                                                     blog:(Blog *)blog
 {
+    if (!remoteTags.count) {
+        return nil;
+    }
+    
     NSMutableArray *tags = [NSMutableArray arrayWithCapacity:remoteTags.count];
     for (RemotePostTag *remoteTag in remoteTags) {
-        [tags addObject:[self tagFromRemoteTag:remoteTag]];
+        [tags addObject:[self tagFromRemoteTag:remoteTag blog:blog]];
     }
     
     return [NSArray arrayWithArray:tags];
 }
 
 - (PostTag *)tagFromRemoteTag:(RemotePostTag *)remoteTag
+                         blog:(Blog *)blog
 {
-    NSEntityDescription *entityDescription = [NSEntityDescription entityForName:[PostTag entityName]
-                                                         inManagedObjectContext:self.managedObjectContext];
+    PostTag *tag = [self existingTagForRemoteTag:remoteTag blog:blog];
+    if (!tag) {
+        NSEntityDescription *entityDescription = [NSEntityDescription entityForName:[PostTag entityName]
+                                                             inManagedObjectContext:self.managedObjectContext];
+        tag = [[PostTag alloc] initWithEntity:entityDescription insertIntoManagedObjectContext:self.managedObjectContext];
+        tag.tagID = remoteTag.tagID;
+        tag.blog = blog;
+    }
     
-    PostTag *tag = [[PostTag alloc] initWithEntity:entityDescription insertIntoManagedObjectContext:self.managedObjectContext];
-    tag.tagID = remoteTag.tagID;
     tag.name = remoteTag.name;
     tag.slug = remoteTag.slug;
     
     return tag;
 }
 
+- (nullable PostTag *)existingTagForRemoteTag:(RemotePostTag *)remoteTag
+                                         blog:(Blog *)blog
+{
+    NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:[PostTag entityName]];
+    request.predicate = [NSPredicate predicateWithFormat:@"blog = %@ AND tagID = %@", blog, remoteTag.tagID];
+    NSError *error;
+    NSArray *tags = [self.managedObjectContext executeFetchRequest:request error:&error];
+    if (error) {
+        DDLogError(@"Error when retrieving PostTag by tagID: %@", error);
+        return nil;
+    }
+    
+    return [tags firstObject];
+}
+
+- (void)handleError:(nullable NSError *)error forBlog:(nullable Blog *)blog withFailure:(nullable void(^)(NSError *error))failure
+{
+    DDLogError(@"Error occurred with %@ - error: %@", [self class], error);
+    if (failure) {
+        failure(error);
+    }
+}
+
 @end
+
+NS_ASSUME_NONNULL_END

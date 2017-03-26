@@ -1,5 +1,5 @@
 #import "PostServiceRemoteREST.h"
-#import "WordPressComApi.h"
+#import "WordPress-Swift.h"
 #import "DisplayableImageHelper.h"
 #import "RemotePost.h"
 #import "RemotePostCategory.h"
@@ -7,6 +7,22 @@
 
 NSString * const PostRemoteStatusPublish = @"publish";
 NSString * const PostRemoteStatusScheduled = @"future";
+
+static NSString * const RemoteOptionKeyNumber = @"number";
+static NSString * const RemoteOptionKeyOffset = @"offset";
+static NSString * const RemoteOptionKeyOrder = @"order";
+static NSString * const RemoteOptionKeyOrderBy = @"order_by";
+static NSString * const RemoteOptionKeyStatus = @"status";
+static NSString * const RemoteOptionKeySearch = @"search";
+static NSString * const RemoteOptionKeyAuthor = @"author";
+
+static NSString * const RemoteOptionValueOrderAscending = @"ASC";
+static NSString * const RemoteOptionValueOrderDescending = @"DESC";
+static NSString * const RemoteOptionValueOrderByDate = @"date";
+static NSString * const RemoteOptionValueOrderByModified = @"modified";
+static NSString * const RemoteOptionValueOrderByTitle = @"title";
+static NSString * const RemoteOptionValueOrderByCommentCount = @"comment_count";
+static NSString * const RemoteOptionValueOrderByPostID = @"ID";
 
 @implementation PostServiceRemoteREST
 
@@ -18,17 +34,17 @@ NSString * const PostRemoteStatusScheduled = @"future";
 
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@", self.siteID, postID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{ @"context": @"edit" };
     
-    [self.api GET:requestUrl
+    [self.wordPressComRestApi GET:requestUrl
        parameters:parameters
-          success:^(AFHTTPRequestOperation *operation, id responseObject) {
+          success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
               if (success) {
                   success([self remotePostFromJSONDictionary:responseObject]);
               }
-          } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+          } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
               if (failure) {
                   failure(error);
               }
@@ -36,7 +52,7 @@ NSString * const PostRemoteStatusScheduled = @"future";
 }
 
 - (void)getPostsOfType:(NSString *)postType
-               success:(void (^)(NSArray *))success
+               success:(void (^)(NSArray <RemotePost *> *remotePosts))success
                failure:(void (^)(NSError *))failure
 {
     [self getPostsOfType:postType options:nil success:success failure:failure];
@@ -44,14 +60,14 @@ NSString * const PostRemoteStatusScheduled = @"future";
 
 - (void)getPostsOfType:(NSString *)postType
                options:(NSDictionary *)options
-               success:(void (^)(NSArray *))success
+               success:(void (^)(NSArray <RemotePost *> *remotePosts))success
                failure:(void (^)(NSError *))failure
 {
     NSParameterAssert([postType isKindOfClass:[NSString class]]);
 
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts", self.siteID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{
                                  @"status": @"any,trash",
@@ -64,13 +80,13 @@ NSString * const PostRemoteStatusScheduled = @"future";
         [mutableParameters addEntriesFromDictionary:options];
         parameters = [NSDictionary dictionaryWithDictionary:mutableParameters];
     }
-    [self.api GET:requestUrl
+    [self.wordPressComRestApi GET:requestUrl
        parameters:parameters
-          success:^(AFHTTPRequestOperation *operation, id responseObject) {
+          success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
               if (success) {
                   success([self remotePostsFromJSONArray:responseObject[@"posts"]]);
               }
-          } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+          } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
               if (failure) {
                   failure(error);
               }
@@ -85,18 +101,18 @@ NSString * const PostRemoteStatusScheduled = @"future";
 
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts/new?context=edit", self.siteID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = [self parametersWithRemotePost:post];
 
-    [self.api POST:requestUrl
+    [self.wordPressComRestApi POST:requestUrl
         parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
+           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
                RemotePost *post = [self remotePostFromJSONDictionary:responseObject];
                if (success) {
                    success(post);
                }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
                if (failure) {
                    failure(error);
                }
@@ -111,18 +127,18 @@ NSString * const PostRemoteStatusScheduled = @"future";
 
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@?context=edit", self.siteID, post.postID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = [self parametersWithRemotePost:post];
 
-    [self.api POST:requestUrl
+    [self.wordPressComRestApi POST:requestUrl
         parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
+           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
                RemotePost *post = [self remotePostFromJSONDictionary:responseObject];
                if (success) {
                    success(post);
                }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
                if (failure) {
                    failure(error);
                }
@@ -137,15 +153,15 @@ NSString * const PostRemoteStatusScheduled = @"future";
 
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/delete", self.siteID, post.postID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
-    [self.api POST:requestUrl
+    [self.wordPressComRestApi POST:requestUrl
         parameters:nil
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
+           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
                if (success) {
                    success();
                }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
                if (failure) {
                    failure(error);
                }
@@ -160,16 +176,16 @@ NSString * const PostRemoteStatusScheduled = @"future";
 
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/delete", self.siteID, post.postID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
-    [self.api POST:requestUrl
+    [self.wordPressComRestApi POST:requestUrl
         parameters:nil
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
+           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
                RemotePost *post = [self remotePostFromJSONDictionary:responseObject];
                if (success) {
                    success(post);
                }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
                if (failure) {
                    failure(error);
                }
@@ -184,22 +200,85 @@ NSString * const PostRemoteStatusScheduled = @"future";
 
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/restore", self.siteID, post.postID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
-    [self.api POST:requestUrl
+    [self.wordPressComRestApi POST:requestUrl
         parameters:nil
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
+           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
                RemotePost *post = [self remotePostFromJSONDictionary:responseObject];
                if (success) {
                    success(post);
                }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
                if (failure) {
                    failure(error);
                }
            }];
 }
 
+- (NSDictionary *)dictionaryWithRemoteOptions:(id <PostServiceRemoteOptions>)options
+{
+    NSMutableDictionary *remoteParams = [NSMutableDictionary dictionary];
+    if (options.number) {
+        [remoteParams setObject:options.number forKey:RemoteOptionKeyNumber];
+    }
+    if (options.offset) {
+        [remoteParams setObject:options.offset forKey:RemoteOptionKeyOffset];
+    }
+    
+    NSString *statusesStr = nil;
+    if (options.statuses.count) {
+        statusesStr = [options.statuses componentsJoinedByString:@","];
+    }
+    if (options.order) {
+        NSString *orderStr = nil;
+        switch (options.order) {
+            case PostServiceResultsOrderDescending:
+                orderStr = RemoteOptionValueOrderDescending;
+                break;
+            case PostServiceResultsOrderAscending:
+                orderStr = RemoteOptionValueOrderAscending;
+                break;
+        }
+        [remoteParams setObject:orderStr forKey:RemoteOptionKeyOrder];
+    }
+    
+    NSString *orderByStr = nil;
+    if (options.orderBy) {
+        switch (options.orderBy) {
+            case PostServiceResultsOrderingByDate:
+                orderByStr = RemoteOptionValueOrderByDate;
+                break;
+            case PostServiceResultsOrderingByModified:
+                orderByStr = RemoteOptionValueOrderByModified;
+                break;
+            case PostServiceResultsOrderingByTitle:
+                orderByStr = RemoteOptionValueOrderByTitle;
+                break;
+            case PostServiceResultsOrderingByCommentCount:
+                orderByStr = RemoteOptionValueOrderByCommentCount;
+                break;
+            case PostServiceResultsOrderingByPostID:
+                orderByStr = RemoteOptionValueOrderByPostID;
+                break;
+        }
+    }
+    
+    if (statusesStr.length) {
+        [remoteParams setObject:statusesStr forKey:RemoteOptionKeyStatus];
+    }
+    if (orderByStr.length) {
+        [remoteParams setObject:orderByStr forKey:RemoteOptionKeyOrderBy];
+    }
+    if (options.authorID) {
+        [remoteParams setObject:options.authorID forKey:RemoteOptionKeyAuthor];
+    }
+    if (options.search.length > 0) {
+        [remoteParams setObject:options.search forKey:RemoteOptionKeySearch];
+    }
+    
+    return remoteParams.count ? [NSDictionary dictionaryWithDictionary:remoteParams] : nil;
+}
 
 #pragma mark - Private methods
 
@@ -213,12 +292,16 @@ NSString * const PostRemoteStatusScheduled = @"future";
     RemotePost *post = [RemotePost new];
     post.postID = jsonPost[@"ID"];
     post.siteID = jsonPost[@"site_ID"];
-    post.authorAvatarURL = jsonPost[@"author"][@"avatar_URL"];
-    post.authorDisplayName = jsonPost[@"author"][@"name"];
-    post.authorEmail = [jsonPost[@"author"] stringForKey:@"email"];
-    post.authorURL = jsonPost[@"author"][@"URL"];
+    if (jsonPost[@"author"] != [NSNull null]) {
+        NSDictionary *authorDictionary = jsonPost[@"author"];
+        post.authorAvatarURL = authorDictionary[@"avatar_URL"];
+        post.authorDisplayName = authorDictionary[@"name"];
+        post.authorEmail = [authorDictionary stringForKey:@"email"];
+        post.authorURL = authorDictionary[@"URL"];
+    }
     post.authorID = [jsonPost numberForKeyPath:@"author.ID"];
     post.date = [NSDate dateWithWordPressComJSONString:jsonPost[@"date"]];
+    post.dateModified = [NSDate dateWithWordPressComJSONString:jsonPost[@"modified"]];
     post.title = jsonPost[@"title"];
     post.URL = [NSURL URLWithString:jsonPost[@"URL"]];
     post.shortURL = [NSURL URLWithString:jsonPost[@"short_URL"]];
@@ -260,9 +343,6 @@ NSString * const PostRemoteStatusScheduled = @"future";
     if (post.postThumbnailPath) {
         post.pathForDisplayImage = post.postThumbnailPath;
     } else {
-        // check attachments for a suitable image
-        post.pathForDisplayImage = [DisplayableImageHelper searchPostAttachmentsForImageToDisplay:[jsonPost dictionaryForKey:@"attachments"]];
-
         // parse contents for a suitable image
         if (!post.pathForDisplayImage) {
             post.pathForDisplayImage = [DisplayableImageHelper searchPostContentForImageToDisplay:post.content];
@@ -292,6 +372,7 @@ NSString * const PostRemoteStatusScheduled = @"future";
     if (post.date) {
         parameters[@"date"] = [post.date WordPressComJSONString];
     } else if (existingPost) {
+        // safety net. An existing post with no create date should publish immediately
         parameters[@"date"] = [[NSDate date] WordPressComJSONString];
     }
     if (post.excerpt) {

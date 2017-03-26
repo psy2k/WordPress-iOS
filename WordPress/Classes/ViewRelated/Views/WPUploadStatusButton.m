@@ -8,7 +8,7 @@
     WPUploadStatusButton *button = [WPUploadStatusButton buttonWithType:UIButtonTypeSystem];
     button.frame = frame;
     button.titleLabel.textColor = [UIColor whiteColor];
-    button.titleLabel.font = [WPFontManager openSansBoldFontOfSize:14.0];
+    button.titleLabel.font = [WPFontManager systemBoldFontOfSize:14.0];
     button.backgroundColor = [UIColor clearColor];
     button.titleLabel.adjustsFontSizeToFitWidth = NO;
     button.autoresizingMask = UIViewAutoresizingFlexibleWidth;
@@ -16,7 +16,7 @@
     [button setTitle:NSLocalizedString(@"Uploading...", @"\"Uploading...\" Status text") forState:UIControlStateNormal];
     [button setAccessibilityHint:NSLocalizedString(@"Tap to select which blog to post to", @"This is the blog picker in the editor")];
     button.titleLabel.numberOfLines = 1;
-    button.titleLabel.textAlignment = NSTextAlignmentLeft;
+    button.titleLabel.textAlignment = NSTextAlignmentNatural;
     button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
     button.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     

@@ -1,7 +1,5 @@
 #import "WPLegacyEditPostViewController.h"
-#import "WPLegacyEditPostViewController_Internal.h"
 #import "ContextManager.h"
-#import "Post.h"
 #import "Coordinate.h"
 #import "Media.h"
 #import "WPTableViewCell.h"
@@ -24,12 +22,26 @@
 #import "WPAndDeviceMediaLibraryDataSource.h"
 #import "NSString+Helpers.h"	
 #import "WPAppAnalytics.h"
+@import Gridicons;
+#import <WordPressShared/WPStyleGuide.h>
+#import <WordPressEditor/WPLegacyEditorFormatToolbar.h>
+#import "PostSettingsViewController.h"
+#import "PostPreviewViewController.h"
+#import "AbstractPost.h"
+#import <SVProgressHUD/SVProgressHUD.h>
+#import "Media+HTML.h"
 
 NSString *const WPLegacyEditorNavigationRestorationID = @"WPLegacyEditorNavigationRestorationID";
 NSString *const WPLegacyAbstractPostRestorationKey = @"WPLegacyAbstractPostRestorationKey";
 static void *ProgressObserverContext = &ProgressObserverContext;
 
-@interface WPLegacyEditPostViewController ()<UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate>
+
+@interface WPLegacyEditPostViewController ()<UITextFieldDelegate, UITextViewDelegate, UIViewControllerRestoration, WPMediaPickerViewControllerDelegate>
+
+@property (nonatomic, strong) PostSettingsViewController *postSettingsViewController;
+@property (nonatomic, assign) EditPostViewControllerMode editMode;
+@property (nonatomic, strong) AbstractPost *post;
+@property (readonly) BOOL hasChanges;
 
 @property (nonatomic, strong) UIButton *titleBarButton;
 @property (nonatomic, strong) UIButton *uploadStatusButton;
@@ -39,6 +51,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 @property (nonatomic, strong) UIProgressView * mediaProgressView;
 @property (nonatomic, strong) NSMutableDictionary *mediaInProgress;
 @property (nonatomic, strong) WPAndDeviceMediaLibraryDataSource *mediaLibraryDataSource;
+@property (nonatomic, strong) UIBarButtonItem *saveBarButtonItem;
+@property (nonatomic, strong) UIBarButtonItem *previewBarButtonItem;
+@property (nonatomic, strong) UIBarButtonItem *optionsBarButtonItem;
 
 @end
 
@@ -46,7 +61,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 + (UIViewController *)viewControllerWithRestorationIdentifierPath:(NSArray *)identifierComponents coder:(NSCoder *)coder
 {
-    BOOL dontRestoreIfNewEditorIsEnabled = [WPPostViewController isNewEditorEnabled];
+    BOOL dontRestoreIfNewEditorIsEnabled = [[EditorSettings new] visualEditorEnabled];
     
     if (dontRestoreIfNewEditorIsEnabled) {
         return nil;
@@ -118,9 +133,12 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+    PostService *postService = [[PostService alloc] initWithManagedObjectContext:context];
 
     Blog *blog = [blogService lastUsedOrFirstBlog];
-    return [self initWithPost:[PostService createDraftPostInMainContextForBlog:blog]];
+    AbstractPost *post = [postService createDraftPostForBlog:blog];
+
+    return [self initWithPost:post];
 }
 
 - (id)initWithPost:(AbstractPost *)post
@@ -149,10 +167,23 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
-    [self geotagNewPost];
     self.mediaInProgress = [NSMutableDictionary dictionary];
     self.mediaProgressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];
     self.delegate = self;
+}
+
+- (void)customizeAppearance
+{
+    [super customizeAppearance];
+    [self setTitleFont:[WPFontManager notoBoldFontOfSize:24.0]];
+    [self setTitleColor:[WPStyleGuide darkGrey]];
+    [self setBodyFont:[UIFont fontWithName: @"Menlo-Regular" size:14.0f]];
+    [self setBodyColor:[WPStyleGuide darkGrey]];
+    [self setPlaceholderColor:[WPStyleGuide textFieldPlaceholderGrey]];
+    [self setSeparatorColor:[WPStyleGuide greyLighten20]];
+
+    [[WPLegacyEditorFormatToolbar appearance] setTintColor:[WPStyleGuide greyLighten10]];
+    [[WPLegacyEditorFormatToolbar appearance] setBackgroundColor:[UIColor colorWithRed:0xF9/255.0 green:0xFB/255.0 blue:0xFC/255.0 alpha:1]];
 }
 
 - (void)viewDidAppear:(BOOL)animated
@@ -178,6 +209,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     CGRect frame = self.mediaProgressView.frame;
     frame.size.width = self.view.frame.size.width;
     frame.origin.y = self.navigationController.navigationBar.frame.size.height-frame.size.height;
+    self.mediaProgressView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
     [self.mediaProgressView setFrame:frame];
 }
 
@@ -186,11 +218,15 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)setupNavbar
 {
     if (self.navigationItem.leftBarButtonItem == nil) {
-        UIBarButtonItem *cancelButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Close", @"Label for the button to close the post editor.") style:UIBarButtonItemStylePlain target:self action:@selector(cancelEditing)];
+        UIImage *image = [Gridicon iconOfType:GridiconTypeCross];
+        UIBarButtonItem *cancelButton = [[UIBarButtonItem alloc] initWithImage:image
+                                                                         style:UIBarButtonItemStylePlain
+                                                                        target:self
+                                                                        action:@selector(cancelEditing)];
+        cancelButton.accessibilityLabel = NSLocalizedString(@"Close", @"Label for the button to close the post editor.");
         self.navigationItem.leftBarButtonItem = cancelButton;
-    }
-    self.navigationItem.backBarButtonItem.title = [self editorTitle];
-    self.title = [self editorTitle];
+    }    
+    //self.title = [self editorTitle];
 
     // Configure the custom title view, or just set the navigationItem title.
     // Only show the blog selector in the nav title view if we're editing a new post
@@ -202,7 +238,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     if ([self isMediaUploading]) {
         [self refreshMediaProgress];
         UIButton *titleButton = self.uploadStatusButton;
-        NSMutableAttributedString *titleText = [[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@", NSLocalizedString(@"Media Uploading...", @"Message to indicate progress of uploading media to server")]                                                                                      attributes:@{ NSFontAttributeName : [WPFontManager openSansBoldFontOfSize:14.0] }];
+        NSMutableAttributedString *titleText = [[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@", NSLocalizedString(@"Media Uploading...", @"Message to indicate progress of uploading media to server")]                                                                                      attributes:@{ NSFontAttributeName : [WPFontManager systemBoldFontOfSize:14.0] }];
         [titleButton setAttributedTitle:titleText forState:UIControlStateNormal];
         [titleButton sizeToFit];
         if (self.navigationItem.titleView != titleButton){
@@ -211,18 +247,14 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     } else if (blogCount <= 1 || self.editMode == EditPostViewControllerModeEditPost || [[WPTabBarController sharedInstance] isNavigatingMySitesTab]) {
         self.navigationItem.titleView = nil;
         self.navigationItem.title = [self editorTitle];
+        [self.navigationController.navigationBar layoutIfNeeded];
     } else {
         UIButton *titleButton = self.titleBarButton;
         self.navigationItem.titleView = titleButton;
-        NSMutableAttributedString *titleText = [[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@\n", [self editorTitle]]
-                                                                                      attributes:@{ NSFontAttributeName : [WPFontManager openSansBoldFontOfSize:14.0] }];
+        NSString *title = [self editorTitle];
+        NSMutableAttributedString *titleText = [[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@", title]
+                                                                                      attributes:@{ NSFontAttributeName : [WPFontManager systemBoldFontOfSize:14.0] }];
 
-        NSString *name = self.post.blog.settings.name;
-        NSString *subtext = name.length == 0 ? self.post.blog.url : name;
-        NSDictionary *subtextAttributes = @{ NSFontAttributeName: [WPFontManager openSansRegularFontOfSize:10.0] };
-        NSMutableAttributedString *titleSubtext = [[NSMutableAttributedString alloc] initWithString:subtext
-                                                                                         attributes:subtextAttributes];
-        [titleText appendAttributedString:titleSubtext];
         [titleButton setAttributedTitle:titleText forState:UIControlStateNormal];
 
         [titleButton sizeToFit];
@@ -255,14 +287,14 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self dismissViewControllerAnimated:YES completion:nil];
         self.dismissingBlogPicker = NO;
     };
-    void (^selectedCompletion)(NSManagedObjectID *) = ^(NSManagedObjectID *selectedObjectID) {
+    void (^successHandler)(NSManagedObjectID *) = ^(NSManagedObjectID *selectedObjectID) {
         NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
         Blog *blog = (Blog *)[context objectWithID:selectedObjectID];
 
         if (blog) {
-            BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+            RecentSitesService *recentSites = [RecentSitesService new];
+            [recentSites touchBlog:blog];
 
-            [blogService flagBlogAsLastUsed:blog];
             AbstractPost *newPost = [self createNewDraftForBlog:blog];
             AbstractPost *oldPost = self.post;
 
@@ -277,6 +309,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
             newPost.password = oldPost.password;
             newPost.status = oldPost.status;
             newPost.dateCreated = oldPost.dateCreated;
+            newPost.dateModified = oldPost.dateModified;
 
             if ([newPost isKindOfClass:[Post class]]) {
                 ((Post *)newPost).tags = ((Post *)oldPost).tags;
@@ -300,10 +333,12 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     };
 
     BlogSelectorViewController *vc = [[BlogSelectorViewController alloc] initWithSelectedBlogObjectID:self.post.blog.objectID
-                                                                                   selectedCompletion:selectedCompletion
-                                                                                     cancelCompletion:dismissHandler];
+                                                                                       successHandler:successHandler
+                                                                                       dismissHandler:dismissHandler];
+    vc.displaysPrimaryBlogOnTop = YES;
+    vc.displaysCancelButton = [self hasHorizontallyCompactView];
     vc.title = NSLocalizedString(@"Select Site", @"");
-
+    
     UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
     navController.navigationBar.translucent = NO;
     navController.navigationBar.barStyle = UIBarStyleBlack;
@@ -327,7 +362,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)showSettings
 {
     Post *post = (Post *)self.post;
-    UIViewController *vc = [[[self classForSettingsViewController] alloc] initWithPost:post shouldHideStatusBar:NO];
+    UIViewController *vc = [[[self classForSettingsViewController] alloc] initWithPost:post];
     UIBarButtonItem *backButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Back", nil) style:UIBarButtonItemStylePlain target:nil action:nil];
     self.navigationItem.backBarButtonItem = backButton;
     [self.navigationController pushViewController:vc animated:YES];
@@ -335,7 +370,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)showPreview
 {
-    PostPreviewViewController *vc = [[PostPreviewViewController alloc] initWithPost:self.post shouldHideStatusBar:NO];
+    PostPreviewViewController *vc = [[PostPreviewViewController alloc] initWithPost:self.post];
     UIBarButtonItem *backButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Back", nil) style:UIBarButtonItemStylePlain target:nil action:nil];
     self.navigationItem.backBarButtonItem = backButton;
     [self.navigationController pushViewController:vc animated:YES];
@@ -343,7 +378,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)showMediaPicker
 {
-    WPMediaPickerViewController *picker = [[WPMediaPickerViewController alloc] init];
+    WPNavigationMediaPickerViewController *picker = [[WPNavigationMediaPickerViewController alloc] init];
     picker.delegate = self;
     if (!self.mediaLibraryDataSource) {
         self.mediaLibraryDataSource = [[WPAndDeviceMediaLibraryDataSource alloc] initWithPost:self.post];
@@ -351,7 +386,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     picker.dataSource = self.mediaLibraryDataSource;
     picker.allowCaptureOfMedia = YES;
     picker.showMostRecentFirst = YES;
-    picker.filter = WPMediaTypeImage;
+    picker.filter = WPMediaTypeVideoOrImage;
     
     [self presentViewController:picker animated:YES completion:nil];
 }
@@ -370,7 +405,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [WPAppAnalytics track:WPAnalyticsStatEditorClosed withBlog:self.post.blog];
 
         [self discardChanges];
-        [self dismissEditView];
+        [self dismissEditView:NO];
         return;
     }
     UIAlertController *alertController;
@@ -384,7 +419,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                                   style:UIAlertActionStyleDestructive
                                 handler:^(UIAlertAction * action) {
                                     [self discardChanges];
-                                    [self dismissEditView];
+                                    [self dismissEditView:NO];
                                     [WPAppAnalytics track:WPAnalyticsStatEditorDiscardedChanges withBlog:self.post.blog];
                                 }];
     
@@ -401,7 +436,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                                         }
                                         DDLogInfo(@"Saving post as a draft after user initially attempted to cancel");
                                         [self savePost:YES];
-                                        [self dismissEditView];
                                     }];
     }
     
@@ -412,27 +446,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 #pragma mark - Instance Methods
 
 - (AbstractPost *)createNewDraftForBlog:(Blog *)blog {
-    return [PostService createDraftPostInMainContextForBlog:blog];
-}
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    PostService *postService = [[PostService alloc] initWithManagedObjectContext:context];
+    AbstractPost *post = [postService createDraftPostForBlog:blog];
 
-- (void)geotagNewPost
-{
-    if (EditPostViewControllerModeNewPost != self.editMode) {
-        return;
-    }
-
-    if (self.post.blog.settings.geolocationEnabled && ![LocationService sharedService].locationServicesDisabled) {
-        [[LocationService sharedService] getCurrentLocationAndAddress:^(CLLocation *location, NSString *address, NSError *error) {
-            if (location) {
-                if (self.post.isDeleted) {
-                    return;
-                }
-                Coordinate *coord = [[Coordinate alloc] initWithCoordinate:location.coordinate];
-                Post *post = (Post *)self.post;
-                post.geolocation = coord;
-            }
-        }];
-    }
+    return post;
 }
 
 /*
@@ -446,22 +464,15 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     if (blogChanged) {
         NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
         BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-        [blogService syncBlog:blog];
+        [blogService syncBlogAndAllMetadata:blog completionHandler:nil];
     }
 }
 
 - (NSString *)editorTitle
 {
     NSString *title = @"";
-    if (self.editMode == EditPostViewControllerModeNewPost) {
-        title = NSLocalizedString(@"New Post", @"Post Editor screen title.");
-    } else {
-        if ([self.post.postTitle length]) {
-            title = self.post.postTitle;
-        } else {
-            title = NSLocalizedString(@"Edit Post", @"Post Editor screen title.");
-        }
-    }
+    NSString *name = self.post.blog.settings.name;
+    title = [name trim].length == 0 ? self.post.blog.url : name;
     return title;
 }
 
@@ -482,7 +493,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
             buttonTitle = NSLocalizedString(@"Schedule", @"Schedule button, this is what the Publish button changes to in the Post Editor if the post has been scheduled for posting later.");
 
         } else if ([self.post.status isEqualToString:PostStatusPublish]) {
-            buttonTitle = NSLocalizedString(@"Publish", @"Publish button label.");
+            buttonTitle = NSLocalizedString(@"Post", @"Publish button label.");
 
         } else {
             buttonTitle = NSLocalizedString(@"Save", @"Save button label (saving content, ex: Post, Page, Comment).");
@@ -491,45 +502,69 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         buttonTitle = NSLocalizedString(@"Update", @"Update button label (saving content, ex: Post, Page, Comment).");
     }
 
-    if (self.navigationItem.rightBarButtonItem == nil) {
-        UIBarButtonItem *saveButton = [[UIBarButtonItem alloc] initWithTitle:buttonTitle
-                                                                       style:[WPStyleGuide barButtonStyleForDone]
-                                                                      target:self
-                                                                      action:@selector(saveAction)];
-        
-        // Seems to be a bug with UIBarButtonItem respecting the UIControlStateDisabled text color
-        [saveButton setTitleTextAttributes:@{NSFontAttributeName: [WPStyleGuide regularTextFont], NSForegroundColorAttributeName: [UIColor whiteColor]} forState:UIControlStateNormal];
-        [saveButton setTitleTextAttributes:@{NSFontAttributeName: [WPStyleGuide regularTextFont], NSForegroundColorAttributeName: [UIColor colorWithWhite:1.0 alpha:0.25]} forState:UIControlStateDisabled];
-        self.navigationItem.rightBarButtonItem = saveButton;
-    } else {
-        self.navigationItem.rightBarButtonItem.title = buttonTitle;
+    self.saveBarButtonItem.title = buttonTitle;
+    BOOL updateEnabled = [self.post canSave];
+    [self.saveBarButtonItem setEnabled:updateEnabled];
+    self.navigationItem.rightBarButtonItems = @[self.saveBarButtonItem, self.optionsBarButtonItem, self.previewBarButtonItem];
+}
+
+- (UIBarButtonItem *)optionsBarButtonItem
+{
+    if (!_optionsBarButtonItem) {
+        UIImage *image = [Gridicon iconOfType:GridiconTypeCog];
+        _optionsBarButtonItem = [[UIBarButtonItem alloc] initWithImage:image
+                                                                 style:UIBarButtonItemStylePlain
+                                                                target:self
+                                                                action:@selector(showSettings)];
+
+        NSString *optionsTitle = NSLocalizedString(@"Options", @"Title of the Post Settings navigation button in the Post Editor. Tapping shows settings and options related to the post being edited.");
+        _optionsBarButtonItem.accessibilityLabel = optionsTitle;
+        _optionsBarButtonItem.accessibilityIdentifier = @"Options";
     }
 
-    BOOL updateEnabled = [self.post canSave];
-    [self.navigationItem.rightBarButtonItem setEnabled:updateEnabled];
+    return _optionsBarButtonItem;
 }
+
+- (UIBarButtonItem *)previewBarButtonItem
+{
+    if (!_previewBarButtonItem) {
+        UIImage *image = [Gridicon iconOfType:GridiconTypeVisible];
+        _previewBarButtonItem = [[UIBarButtonItem alloc] initWithImage:image
+                                                                 style:UIBarButtonItemStylePlain
+                                                                target:self
+                                                                action:@selector(showPreview)];
+        _previewBarButtonItem.accessibilityLabel = NSLocalizedString(@"Preview", @"Action button to preview the content of post or page on the  live site");
+    }
+
+    return _previewBarButtonItem;
+}
+
+- (UIBarButtonItem *)saveBarButtonItem
+{
+    if (!_saveBarButtonItem) {
+        _saveBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Save", @"Save button label (saving content, ex: Post, Page, Comment).")
+                                                              style:UIBarButtonItemStylePlain
+                                                             target:self
+                                                             action:@selector(saveAction)];        
+    }
+
+    return _saveBarButtonItem;
+}
+
 
 - (void)refreshUIForCurrentPost
 {
     [self setupNavbar];
     self.titleText = self.post.postTitle;
+    self.bodyText = self.post.content ?: @"";
 
-    if (self.post.content == nil || [self.post.content isEmpty]) {
-        self.bodyText = @"";
-    } else {
-        if ((self.post.mt_text_more != nil) && ([self.post.mt_text_more length] > 0)) {
-            self.bodyText = [NSString stringWithFormat:@"%@\n<!--more-->\n%@", self.post.content, self.post.mt_text_more];
-        } else {
-            self.bodyText = self.post.content;
-        }
-    }
     [self refreshButtons];
 }
 
 - (UIButton *)titleBarButton
 {
     if (!_titleBarButton) {
-        UIButton *titleButton = [WPBlogSelectorButton buttonWithFrame:CGRectMake(0.0f, 0.0f, 200.0f, 33.0f) buttonStyle:WPBlogSelectorButtonTypeStacked];
+        UIButton *titleButton = [WPBlogSelectorButton buttonWithFrame:CGRectMake(0.0f, 0.0f, 200.0f, 33.0f) buttonStyle:WPBlogSelectorButtonTypeSingleLine];
         [titleButton addTarget:self action:@selector(showBlogSelectorPrompt) forControlEvents:UIControlEventTouchUpInside];
         _titleBarButton = titleButton;
     }
@@ -539,7 +574,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (UIButton *)uploadStatusButton
 {
     if (!_uploadStatusButton) {
-        UIButton *button = [WPBlogSelectorButton buttonWithFrame:CGRectMake(0.0f, 0.0f, 250.0f, 33.0f) buttonStyle:WPBlogSelectorButtonTypeStacked];
+        UIButton *button = [WPBlogSelectorButton buttonWithFrame:CGRectMake(0.0f, 0.0f, 250.0f, 33.0f) buttonStyle:WPBlogSelectorButtonTypeSingleLine];
         [button addTarget:self action:@selector(showMediaProgress) forControlEvents:UIControlEventTouchUpInside];
         _uploadStatusButton = button;
     }
@@ -592,10 +627,10 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
 }
 
-- (void)dismissEditView
+- (void)dismissEditView:(BOOL)changesSaved
 {
     if (self.onClose) {
-        self.onClose();
+        self.onClose(self, changesSaved);
         self.onClose = nil;
     } else{
         [self.presentingViewController dismissViewControllerAnimated:YES completion:nil];
@@ -605,8 +640,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)saveAction
 {
-    [self dismissViewControllerAnimated:YES completion:nil];
-
     if ([self isMediaUploading] ) {
         [self showMediaInUploadingAlert];
         return;
@@ -618,32 +651,79 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
 
     [self savePost:YES];
-    [self dismissEditView];
 }
 
 - (void)savePost:(BOOL)upload
 {
+    __weak __typeof__(self) weakSelf = self;
+    __block NSString *postStatus = self.post.status;
+    __block NSString *postOriginalStatus = self.post.original.status;
+    __block BOOL postIsScheduled = self.post.isScheduled;
+
+    void (^stopEditingAndDismiss)() = ^{
+        __typeof__(self) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        [strongSelf stopEditing];
+        [strongSelf.view endEditing:YES];
+        [strongSelf didSaveNewPost];
+        [strongSelf dismissEditView:YES];
+    };
+
     DDLogMethod();
     [self logSavePostStats];
 
-    [self.view endEditing:YES];
+    NSString *hudText;
+    if (![postStatus isEqualToString:postOriginalStatus]) {
+        if (postIsScheduled) {
+            hudText = NSLocalizedString(@"Scheduling...", @"Text displayed in HUD while a post is being scheduled to be published.");
+        } else if ([postStatus isEqualToString:PostStatusPublish]) {
+            hudText = NSLocalizedString(@"Publishing...", @"Text displayed in HUD while a post is being published.");
+        } else {
+            hudText = NSLocalizedString(@"Saving...", @"Text displayed in HUD while a post is being saved as a draft.");
+        }
+    } else {
+        hudText = NSLocalizedString(@"Updating...", @"Text displayed in HUD while a published or draft post is being updated.");
+    }
 
-    [self.post.original applyRevision];
-    [self.post.original deleteRevision];
-
+    [SVProgressHUD setDefaultMaskType:SVProgressHUDMaskTypeClear];
+    [SVProgressHUD showWithStatus:hudText];
     if (upload) {
         NSString *postTitle = self.post.original.postTitle;
         NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
         PostService *postService = [[PostService alloc] initWithManagedObjectContext:context];
-        [postService uploadPost:(Post *)self.post.original
-                        success:^{
+        [postService uploadPost:(Post *)self.post
+                        success:^(AbstractPost *post){
+                            __typeof__(self) strongSelf = weakSelf;
+                            if (!strongSelf) {
+                                return;
+                            }
+                            strongSelf.post = post;
                             DDLogInfo(@"post uploaded: %@", postTitle);
+
+                            [SVProgressHUD dismiss];
+
+                            stopEditingAndDismiss();
                         } failure:^(NSError *error) {
                             DDLogError(@"post failed: %@", [error localizedDescription]);
+
+                            NSString *hudText;
+                            if (![postStatus isEqualToString:postOriginalStatus]) {
+                                if (postIsScheduled) {
+                                    hudText = NSLocalizedString(@"Error occurred\nduring scheduling", @"Text displayed in HUD after attempting to schedule a post and an error occurred.");
+                                } else if ([postStatus isEqualToString:PostStatusPublish]) {
+                                    hudText = NSLocalizedString(@"Error occurred\nduring publishing", @"Text displayed in HUD after attempting to publish a post and an error occurred.");
+                                } else {
+                                    hudText = NSLocalizedString(@"Error occurred\nduring saving", @"Text displayed in HUD after attempting to save a draft post and an error occurred.");
+                                }
+                            } else {
+                                hudText = NSLocalizedString(@"Error occurred\nduring updating", @"Text displayed in HUD after attempting to update a post and an error occurred.");
+                            }
+                            [SVProgressHUD showErrorWithStatus:hudText];
+                            stopEditingAndDismiss();
                         }];
     }
-
-    [self didSaveNewPost];
 }
 
 - (void)didSaveNewPost
@@ -655,7 +735,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)logSavePostStats
 {
-    NSString *buttonTitle = self.navigationItem.rightBarButtonItem.title;
+    NSString *buttonTitle = self.saveBarButtonItem.title;
     
     NSInteger originalWordCount = [self.post.original.content wordCount];
     NSInteger wordCount = [self.post.content wordCount];
@@ -671,7 +751,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         properties[WPAppAnalyticsKeyBlogID] = dotComID;
     }
     
-    if ([buttonTitle isEqualToString:NSLocalizedString(@"Publish", nil)]) {
+    if ([buttonTitle isEqualToString:NSLocalizedString(@"Post", nil)]) {
         properties[WPAnalyticsStatEditorPublishedPostPropertyCategory] = @([self.post hasCategories]);
         properties[WPAnalyticsStatEditorPublishedPostPropertyPhoto] = @([self.post hasPhoto]);
         properties[WPAnalyticsStatEditorPublishedPostPropertyTag] = @([self.post hasTags]);
@@ -690,12 +770,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)autosaveContent
 {
     self.post.postTitle = self.titleText;
-    self.navigationItem.title = [self editorTitle];
 
     self.post.content = self.bodyText;
-    if ([self.post.content rangeOfString:@"<!--more-->"].location != NSNotFound) {
-        self.post.mt_text_more = @"";
-    }
 
     if ( self.post.original.password != nil ) { //original post was password protected
         if ( self.post.password == nil || [self.post.password isEqualToString:@""] ) { //removed the password
@@ -758,7 +834,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                                                                       preferredStyle:UIAlertControllerStyleAlert];
     [alertController addDefaultActionWithTitle:NSLocalizedString(@"Post anyway", @"") handler:^(UIAlertAction *action) {
         [self savePost:YES];
-        [self dismissEditView];
     }];
     [alertController addCancelActionWithTitle:NSLocalizedString(@"Not Now", "Nicer dialog answer for \"No\".") handler:nil];
     [self presentViewController:alertController animated:YES completion:nil];
@@ -883,14 +958,14 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)addDeviceMediaAsset:(PHAsset *)asset
 {
-    if (asset.mediaType == PHAssetMediaTypeImage) {
+    if (asset.mediaType == PHAssetMediaTypeImage || asset.mediaType == PHAssetMediaTypeVideo) {
         MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
         __weak __typeof__(self) weakSelf = self;
         NSString* imageUniqueId = [self uniqueIdForMedia];
         NSProgress *createMediaProgress = [[NSProgress alloc] initWithParent:nil userInfo:nil];
         createMediaProgress.totalUnitCount = 2;
         [self trackMediaWithId:imageUniqueId usingProgress:createMediaProgress];
-        [mediaService createMediaWithPHAsset:asset forPostObjectID:self.post.objectID completion:^(Media *media, NSError * error) {
+        [mediaService createMediaWithPHAsset:asset forPostObjectID:self.post.objectID thumbnailCallback:nil completion:^(Media *media, NSError * error) {
             if (error){
                 [WPError showAlertWithTitle:NSLocalizedString(@"Failed to export media", @"The title for an alert that says to the user the media (image or video) he selected couldn't be used on the post.") message:error.localizedDescription];
                 [self stopTrackingProgressOfMediaWithId:imageUniqueId];
@@ -901,6 +976,15 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                 return;
             }
             createMediaProgress.completedUnitCount++;
+            if (media.mediaType == WPMediaTypeImage) {
+                [WPAppAnalytics track:WPAnalyticsStatEditorAddedPhotoViaLocalLibrary
+                       withProperties:[WPAppAnalytics propertiesFor:media]
+                             withBlog:self.post.blog];
+            } else if (media.mediaType == WPMediaTypeVideo) {
+                [WPAppAnalytics track:WPAnalyticsStatEditorAddedVideoViaLocalLibrary
+                       withProperties:[WPAppAnalytics propertiesFor:media]
+                             withBlog:self.post.blog];
+            }
             [self uploadMedia:media trackingId:imageUniqueId];
         }];
     }
@@ -915,8 +999,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self insertMedia:media];
         [self stopTrackingProgressOfMediaWithId:mediaUniqueId];
     } failure:^(NSError *error) {
+        [WPAppAnalytics track:WPAnalyticsStatEditorUploadMediaFailed withBlog:self.post.blog];
         [self stopTrackingProgressOfMediaWithId:mediaUniqueId];
-        if (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled) {
+        if ([error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled) {
             DDLogWarn(@"Media uploader failed with cancelled upload: %@", error.localizedDescription);
             return;
         }
@@ -934,10 +1019,24 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 {
     NSString *mediaUniqueID = [self uniqueIdForMedia];
     if ([media.mediaID intValue] != 0) {
+        if ([media mediaType] == MediaTypeImage) {
+            [WPAppAnalytics track:WPAnalyticsStatEditorAddedPhotoViaWPMediaLibrary withBlog:self.post.blog];
+        } else if ([media mediaType] == MediaTypeVideo) {
+            [WPAppAnalytics track:WPAnalyticsStatEditorAddedVideoViaWPMediaLibrary withBlog:self.post.blog];
+        }
         [self trackMediaWithId:mediaUniqueID usingProgress:[NSProgress progressWithTotalUnitCount:1]];
         [self insertMedia:media];
         [self stopTrackingProgressOfMediaWithId:mediaUniqueID];
     } else {
+        if (media.mediaType == WPMediaTypeImage) {
+            [WPAppAnalytics track:WPAnalyticsStatEditorAddedPhotoViaLocalLibrary
+                   withProperties:[WPAppAnalytics propertiesFor:media]
+                         withBlog:self.post.blog];
+        } else if (media.mediaType == WPMediaTypeVideo) {
+            [WPAppAnalytics track:WPAnalyticsStatEditorAddedVideoViaLocalLibrary
+                   withProperties:[WPAppAnalytics propertiesFor:media]
+                         withBlog:self.post.blog];
+        }
         [self uploadMedia:media trackingId:mediaUniqueID];
     }
 }
@@ -950,7 +1049,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)insertMedia:(Media *)media
 {
-    [WPAppAnalytics track:WPAnalyticsStatEditorAddedPhotoViaLocalLibrary withBlog:self.post.blog];
     NSString *prefix = @"<br /><br />";
 
     if (self.post.content == nil || [self.post.content isEqualToString:@""]) {
@@ -961,7 +1059,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     NSMutableString *content = [[NSMutableString alloc] initWithString:self.post.content];
     NSRange imgHTML = [content rangeOfString: media.html];
     NSRange imgHTMLPre = [content rangeOfString:[NSString stringWithFormat:@"%@%@", @"<br /><br />", media.html]];
-     NSRange imgHTMLPost = [content rangeOfString:[NSString stringWithFormat:@"%@%@", media.html, @"<br /><br />"]];
+    NSRange imgHTMLPost = [content rangeOfString:[NSString stringWithFormat:@"%@%@", media.html, @"<br /><br />"]];
 
     if (imgHTMLPre.location == NSNotFound && imgHTMLPost.location == NSNotFound && imgHTML.location == NSNotFound) {
         [content appendString:[NSString stringWithFormat:@"%@%@", prefix, media.html]];
@@ -1008,7 +1106,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (BOOL)editorShouldBeginEditing:(WPLegacyEditorViewController *)editorController
 {
     self.post.postTitle = self.titleText;
-    self.navigationItem.title = [self editorTitle];
 
     [self refreshButtons];
     return YES;

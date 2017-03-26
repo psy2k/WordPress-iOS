@@ -1,59 +1,56 @@
 import Foundation
 import WordPressShared
 
-@objc public class ReaderTagStreamHeader: UIView, ReaderStreamHeader
-{
-    @IBOutlet private weak var innerContentView: UIView!
-    @IBOutlet private weak var titleLabel: UILabel!
-    @IBOutlet private weak var followButton: PostMetaButton!
-    @IBOutlet private weak var contentIPadTopConstraint: NSLayoutConstraint?
-    @IBOutlet private weak var contentBottomConstraint: NSLayoutConstraint!
+@objc open class ReaderTagStreamHeader: UIView, ReaderStreamHeader {
+    @IBOutlet fileprivate weak var borderedView: UIView!
+    @IBOutlet fileprivate weak var titleLabel: UILabel!
+    @IBOutlet fileprivate weak var followButton: PostMetaButton!
 
-    public var delegate: ReaderStreamHeaderDelegate?
+    open var delegate: ReaderStreamHeaderDelegate?
 
 
     // MARK: - Lifecycle Methods
 
-    public override func awakeFromNib() {
+    open override func awakeFromNib() {
         super.awakeFromNib()
 
         applyStyles()
+        adjustInsetsForTextDirection()
     }
 
     func applyStyles() {
         backgroundColor = WPStyleGuide.greyLighten30()
+        borderedView.layer.borderColor = WPStyleGuide.readerCardCellBorderColor().cgColor
+        borderedView.layer.borderWidth = 1.0
         WPStyleGuide.applyReaderStreamHeaderTitleStyle(titleLabel)
-    }
-
-    public override func sizeThatFits(size: CGSize) -> CGSize {
-        var height = innerContentView.frame.size.height
-        if UIDevice.isPad() && contentIPadTopConstraint != nil {
-            height += contentIPadTopConstraint!.constant
-        }
-        height += contentBottomConstraint.constant
-        return CGSize(width: size.width, height: height)
     }
 
 
     // MARK: - Configuration
 
-    public func configureHeader(topic: ReaderAbstractTopic) {
+    open func configureHeader(_ topic: ReaderAbstractTopic) {
         titleLabel.text = topic.title
-        if topic.following {
-            WPStyleGuide.applyReaderStreamHeaderFollowingStyle(followButton)
-        } else {
-            WPStyleGuide.applyReaderStreamHeaderNotFollowingStyle(followButton)
+        WPStyleGuide.applyReaderFollowButtonStyle(followButton)
+        followButton.isSelected = topic.following
+    }
+
+    open func enableLoggedInFeatures(_ enable: Bool) {
+        followButton.isHidden = !enable
+    }
+
+    fileprivate func adjustInsetsForTextDirection() {
+        guard userInterfaceLayoutDirection() == .rightToLeft else {
+            return
         }
-    }
 
-    public func enableLoggedInFeatures(enable: Bool) {
-        followButton.hidden = !enable
+        followButton.contentEdgeInsets = followButton.contentEdgeInsets.flippedForRightToLeftLayoutDirection()
+        followButton.imageEdgeInsets = followButton.imageEdgeInsets.flippedForRightToLeftLayoutDirection()
+        followButton.titleEdgeInsets = followButton.titleEdgeInsets.flippedForRightToLeftLayoutDirection()
     }
-
 
     // MARK: - Actions
 
-    @IBAction func didTapFollowButton(sender: UIButton) {
+    @IBAction func didTapFollowButton(_ sender: UIButton) {
         delegate?.handleFollowActionForHeader(self)
     }
 }

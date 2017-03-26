@@ -1,5 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <WordPressShared/WPStyleGuide.h>
+#import "WPButtonForNavigationBar.h"
+
+
+NS_ASSUME_NONNULL_BEGIN
 
 @interface WPStyleGuide (Posts)
 
@@ -43,6 +47,15 @@
 + (NSDictionary *)postCardStatusAttributes;
 
 
++ (CGRect)navigationBarButtonRect;
+
++ (CGFloat)spacingBetweeenNavbarButtons;
+
++ (WPButtonForNavigationBar*)buttonForBarWithImage:(UIImage *)image
+                                            target:(id)target
+                                          selector:(SEL)selector;
+
+
 #pragma mark - Pages
 
 + (void)applyPageTitleStyle:(UILabel *)label;
@@ -56,3 +69,5 @@
 + (void)applyRestorePageButtonStyle:(UIButton *)button;
 
 @end
+
+NS_ASSUME_NONNULL_END

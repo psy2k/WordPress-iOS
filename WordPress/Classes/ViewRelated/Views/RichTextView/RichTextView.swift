@@ -1,28 +1,25 @@
 import Foundation
 
 
-@objc public protocol RichTextViewDataSource
-{
-    optional func textView(textView: UITextView, viewForTextAttachment attachment: NSTextAttachment) -> UIView?
+@objc public protocol RichTextViewDataSource {
+    @objc optional func textView(_ textView: UITextView, viewForTextAttachment attachment: NSTextAttachment) -> UIView?
 }
 
-@objc public protocol RichTextViewDelegate : UITextViewDelegate
-{
-    optional func textView(textView: UITextView, didPressLink link: NSURL)
+@objc public protocol RichTextViewDelegate: UITextViewDelegate {
+    @objc optional func textView(_ textView: UITextView, didPressLink link: URL)
 }
 
 
-@objc public class RichTextView : UIView, UITextViewDelegate
-{
-    public var dataSource:  RichTextViewDataSource?
-    public var delegate:    RichTextViewDelegate?
-    
-    
+@objc open class RichTextView: UIView, UITextViewDelegate {
+    open var dataSource: RichTextViewDataSource?
+    open var delegate: RichTextViewDelegate?
+
+
     // MARK: - Initializers
     convenience init() {
-        self.init(frame: CGRectZero)
+        self.init(frame: CGRect.zero)
     }
-    
+
     public override init(frame: CGRect) {
         super.init(frame: frame)
         setupSubviews()
@@ -32,10 +29,10 @@ import Foundation
         super.init(coder: aDecoder)!
         setupSubviews()
     }
-    
-    
-    // MARK: - Properties    
-    public var contentInset: UIEdgeInsets {
+
+
+    // MARK: - Properties
+    open var contentInset: UIEdgeInsets {
         set {
             textView.contentInset = newValue
         }
@@ -44,7 +41,7 @@ import Foundation
         }
     }
 
-    public var textContainerInset: UIEdgeInsets {
+    open var textContainerInset: UIEdgeInsets {
         set {
             textView.textContainerInset = newValue
         }
@@ -52,36 +49,37 @@ import Foundation
             return textView.textContainerInset
         }
     }
-    
-    public var attributedText: NSAttributedString! {
+
+    open var attributedText: NSAttributedString! {
         set {
             textView.attributedText = newValue
+            invalidateIntrinsicContentSize()
             renderAttachments()
         }
         get {
             return textView.attributedText
         }
     }
-    
-    public var editable: Bool {
+
+    open var editable: Bool {
         set {
-            textView.editable = newValue
+            textView.isEditable = newValue
         }
         get {
-            return textView.editable
+            return textView.isEditable
         }
     }
 
-    public var selectable: Bool {
+    open var selectable: Bool {
         set {
-            textView.selectable = newValue
+            textView.isSelectable = newValue
         }
         get {
-            return textView.selectable
+            return textView.isSelectable
         }
     }
-    
-    public var dataDetectorTypes: UIDataDetectorTypes {
+
+    open var dataDetectorTypes: UIDataDetectorTypes {
         set {
             textView.dataDetectorTypes = newValue
         }
@@ -89,23 +87,23 @@ import Foundation
             return textView.dataDetectorTypes
         }
     }
-    
-    public override var backgroundColor: UIColor? {
+
+    open override var backgroundColor: UIColor? {
         didSet {
             textView?.backgroundColor = backgroundColor
         }
     }
-    
-    public var linkTextAttributes: [NSObject : AnyObject]! {
+
+    open var linkTextAttributes: [AnyHashable: Any]! {
         set {
-            textView.linkTextAttributes = newValue as! [String:AnyObject]
+            textView.linkTextAttributes = newValue as! [String: AnyObject]
         }
         get {
             return textView.linkTextAttributes
         }
     }
 
-    public var scrollsToTop: Bool {
+    open var scrollsToTop: Bool {
         set {
             textView.scrollsToTop = newValue
         }
@@ -114,91 +112,78 @@ import Foundation
         }
     }
 
-    // MARK: - TextKit Getters
-    public var layoutManager: NSLayoutManager {
-        get {
-            return textView.layoutManager
-        }
-    }
-    
-    public var textStorage: NSTextStorage {
-        get {
-            return textView.textStorage
-        }
-    }
-    
-    public var textContainer: NSTextContainer {
-        get {
-            return textView.textContainer
-        }
-    }
-
-    
-    // MARK: - Autolayout Helpers
-    public var preferredMaxLayoutWidth: CGFloat = 0 {
+    open var preferredMaxLayoutWidth: CGFloat? {
         didSet {
             invalidateIntrinsicContentSize()
         }
     }
 
-    public override func intrinsicContentSize() -> CGSize {
-        let width: CGFloat = (preferredMaxLayoutWidth != 0) ? preferredMaxLayoutWidth : frame.width
-        let size = CGSize(width: width, height: CGFloat.max)
-        return sizeThatFits(size)
+
+    // MARK: - TextKit Getters
+    open var layoutManager: NSLayoutManager {
+        get {
+            return textView.layoutManager
+        }
     }
 
-    public override func sizeThatFits(size: CGSize) -> CGSize {
-        // Fix: Let's add 1pt extra size. There are few scenarios in which text gets clipped by 1 point
-        let bottomPadding   = CGFloat(1)
-        let maxWidth        = (preferredMaxLayoutWidth != 0) ? min(preferredMaxLayoutWidth, size.width) : size.width
-        let maxSize         = CGSize(width: maxWidth, height: CGFloat.max)
-        let requiredSize    = textView!.sizeThatFits(maxSize)
-        let roundedSize     = CGSize(width: ceil(requiredSize.width), height: ceil(requiredSize.height) + bottomPadding)
-
-        return roundedSize
+    open var textStorage: NSTextStorage {
+        get {
+            return textView.textStorage
+        }
     }
-    
+
+    open var textContainer: NSTextContainer {
+        get {
+            return textView.textContainer
+        }
+    }
+
+
     // MARK: - Private Methods
-    private func setupSubviews() {
+    fileprivate func setupSubviews() {
         gesturesRecognizer                                  = UITapGestureRecognizer()
-        gesturesRecognizer.addTarget(self, action: "handleTextViewTap:")
-        
+        gesturesRecognizer.addTarget(self, action: #selector(RichTextView.handleTextViewTap(_:)))
+
         textView                                            = UITextView(frame: bounds)
         textView.backgroundColor                            = backgroundColor
-        textView.contentInset                               = UIEdgeInsetsZero
-        textView.textContainerInset                         = UIEdgeInsetsZero
+        textView.contentInset                               = UIEdgeInsets.zero
+        textView.textContainerInset                         = UIEdgeInsets.zero
         textView.textContainer.lineFragmentPadding          = 0
         textView.layoutManager.allowsNonContiguousLayout    = false
-        textView.editable                                   = editable
+        textView.isEditable                                   = editable
+        textView.isScrollEnabled                              = false
         textView.dataDetectorTypes                          = dataDetectorTypes
         textView.delegate                                   = self
         textView.gestureRecognizers                         = [gesturesRecognizer]
         addSubview(textView)
-        
+
         // Setup Layout
         textView.translatesAutoresizingMaskIntoConstraints = false
         pinSubviewToAllEdges(textView)
     }
 
-    private func renderAttachments() {
+    fileprivate func renderAttachments() {
         // Nuke old attachments
-        _ = attachmentViews.map { $0.removeFromSuperview() }
-        attachmentViews.removeAll(keepCapacity: false)
-        
+        for view in attachmentViews {
+            view.removeFromSuperview()
+        }
+
+        attachmentViews.removeAll(keepingCapacity: false)
+
         // Proceed only if needed
         if attributedText == nil {
             return
         }
-        
+
         // Load new attachments
         attributedText.enumerateAttachments {
             (attachment: NSTextAttachment, range: NSRange) -> () in
-            
+
             let attachmentView = self.dataSource?.textView?(self.textView, viewForTextAttachment: attachment)
             if attachmentView == nil {
                 return
             }
-            
+
             let unwrappedView           = attachmentView!
             unwrappedView.frame.origin  = self.textView.frameForTextInRange(range).integral.origin
             self.textView.addSubview(unwrappedView)
@@ -206,74 +191,86 @@ import Foundation
         }
     }
 
-    
+    // MARK: - Overriden Methods
+    open override var intrinsicContentSize: CGSize {
+        guard let maxWidth = preferredMaxLayoutWidth else {
+            return super.intrinsicContentSize
+        }
+
+        let maxSize = CGSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude)
+        let requiredSize = textView.sizeThatFits(maxSize)
+
+        return requiredSize
+    }
+
+
     // MARK: - UITapGestureRecognizer Helpers
-    public func handleTextViewTap(recognizer: UITapGestureRecognizer) {
-        
+    open func handleTextViewTap(_ recognizer: UITapGestureRecognizer) {
+
         // NOTE: Why do we need this?
         // Because this mechanism allows us to disable DataDetectors, and yet, detect taps on links.
         //
         let textStorage         = textView.textStorage
         let layoutManager       = textView.layoutManager
         let textContainer       = textView.textContainer
-        
-        let locationInTextView  = recognizer.locationInView(textView)
-        let characterIndex      = layoutManager.characterIndexForPoint(locationInTextView,
-                                                                        inTextContainer: textContainer,
+
+        let locationInTextView  = recognizer.location(in: textView)
+        let characterIndex      = layoutManager.characterIndex(for: locationInTextView,
+                                                                        in: textContainer,
                                                                         fractionOfDistanceBetweenInsertionPoints: nil)
-        
+
         if characterIndex >= textStorage.length {
             return
         }
-        
+
         // Load the NSURL instance, if any
-        let rawURL = textStorage.attribute(NSLinkAttributeName, atIndex: characterIndex, effectiveRange: nil) as? NSURL
+        let rawURL = textStorage.attribute(NSLinkAttributeName, at: characterIndex, effectiveRange: nil) as? URL
         if let unwrappedURL = rawURL {
             delegate?.textView?(textView, didPressLink: unwrappedURL)
         }
     }
-    
-    
+
+
     // MARK: - UITextViewDelegate Wrapped Methods
-    public func textViewShouldBeginEditing(textView: UITextView) -> Bool {
+    open func textViewShouldBeginEditing(_ textView: UITextView) -> Bool {
         return delegate?.textViewShouldBeginEditing?(textView) ?? true
     }
-    
-    public func textViewShouldEndEditing(textView: UITextView) -> Bool {
+
+    open func textViewShouldEndEditing(_ textView: UITextView) -> Bool {
         return delegate?.textViewShouldEndEditing?(textView) ?? true
     }
-    
-    public func textViewDidBeginEditing(textView: UITextView) {
+
+    open func textViewDidBeginEditing(_ textView: UITextView) {
         delegate?.textViewDidBeginEditing?(textView)
     }
-    
-    public func textViewDidEndEditing(textView: UITextView) {
+
+    open func textViewDidEndEditing(_ textView: UITextView) {
         delegate?.textViewDidEndEditing?(textView)
     }
-    
-    public func textView(textView: UITextView, shouldChangeTextInRange range: NSRange, replacementText text: String) -> Bool {
-        return delegate?.textView?(textView, shouldChangeTextInRange: range, replacementText: text) ?? true
+
+    open func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        return delegate?.textView?(textView, shouldChangeTextIn: range, replacementText: text) ?? true
     }
-    
-    public func textViewDidChange(textView: UITextView) {
+
+    open func textViewDidChange(_ textView: UITextView) {
         delegate?.textViewDidChange?(textView)
     }
-    
-    public func textViewDidChangeSelection(textView: UITextView) {
+
+    open func textViewDidChangeSelection(_ textView: UITextView) {
         delegate?.textViewDidChangeSelection?(textView)
     }
-    
-    public func textView(textView: UITextView, shouldInteractWithURL URL: NSURL, inRange characterRange: NSRange) -> Bool {
-        return delegate?.textView?(textView, shouldInteractWithURL: URL, inRange: characterRange) ?? true
+
+    open func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        return delegate?.textView?(textView, shouldInteractWith: URL, in: characterRange, interaction: interaction) ?? true
     }
-    
-    public func textView(textView: UITextView, shouldInteractWithTextAttachment textAttachment: NSTextAttachment, inRange characterRange: NSRange) -> Bool {
-        return delegate?.textView?(textView, shouldInteractWithTextAttachment: textAttachment, inRange: characterRange) ?? true
+
+    open func textView(_ textView: UITextView, shouldInteractWith textAttachment: NSTextAttachment, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        return delegate?.textView?(textView, shouldInteractWith: textAttachment, in: characterRange, interaction: interaction) ?? true
     }
-    
-    
+
+
     // MARK: - Private Properites
-    private var textView:           UITextView!
-    private var gesturesRecognizer: UITapGestureRecognizer!
-    private var attachmentViews:    [UIView] = []
+    fileprivate var textView: UITextView!
+    fileprivate var gesturesRecognizer: UITapGestureRecognizer!
+    fileprivate var attachmentViews: [UIView] = []
 }

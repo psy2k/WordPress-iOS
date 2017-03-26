@@ -1,41 +1,102 @@
 import Foundation
+import Reachability
 
 let AccountSettingsServiceChangeSaveFailedNotification = "AccountSettingsServiceChangeSaveFailed"
 
-struct AccountSettingsService {
-    let remote: AccountSettingsRemote
+protocol AccountSettingsRemoteInterface {
+    func getSettings(success: @escaping (AccountSettings) -> Void, failure: @escaping (Error) -> Void)
+    func updateSetting(_ change: AccountSettingsChange, success: @escaping () -> Void, failure: @escaping (Error) -> Void)
+}
+
+extension AccountSettingsRemote: AccountSettingsRemoteInterface {}
+
+class AccountSettingsService {
+    struct Defaults {
+        static let stallTimeout = 4.0
+        static let maxRetries = 3
+        static let pollingInterval = 60.0
+    }
+
+    enum Notifications {
+        static let accountSettingsChanged = "AccountSettingsServiceSettingsChanged"
+        static let refreshStatusChanged = "AccountSettingsServiceRefreshStatusChanged"
+    }
+
+    let remote: AccountSettingsRemoteInterface
     let userID: Int
 
-    private let context = ContextManager.sharedInstance().mainContext
+    var status: RefreshStatus = .idle {
+        didSet {
+            stallTimer?.invalidate()
+            stallTimer = nil
+            NotificationCenter.default.post(name: Foundation.Notification.Name(rawValue: Notifications.refreshStatusChanged), object: nil)
+        }
+    }
+    var settings: AccountSettings? = nil {
+        didSet {
+            NotificationCenter.default.post(name: Foundation.Notification.Name(rawValue: Notifications.accountSettingsChanged), object: nil)
+        }
+    }
 
-    init(userID: Int, api: WordPressComApi) {
-        self.remote = AccountSettingsRemote(api: api)
+    var stallTimer: Timer?
+
+    fileprivate let context = ContextManager.sharedInstance().mainContext
+
+    convenience init(userID: Int, api: WordPressComRestApi) {
+        let remote = AccountSettingsRemote.remoteWithApi(api)
+        self.init(userID: userID, remote: remote)
+    }
+
+    init(userID: Int, remote: AccountSettingsRemoteInterface) {
         self.userID = userID
+        self.remote = remote
+        loadSettings()
     }
 
-    func refreshSettings(completion: (Bool) -> Void) {
-        remote.getSettings(
-            success: {
-                (settings) -> Void in
-
+    func getSettingsAttempt(count: Int = 0) {
+        self.remote.getSettings(
+            success: { settings in
                 self.updateSettings(settings)
-                completion(true)
-            }, failure: {
-                (error) -> Void in
+                self.status = .idle
+            },
+            failure: { error in
+                let error = error as NSError
+                if error.domain == NSURLErrorDomain {
+                    DDLogSwift.logError("Error refreshing settings (attempt \(count)): \(error)")
+                } else {
+                    DDLogSwift.logError("Error refreshing settings (unrecoverable): \(error)")
+                }
 
-                DDLogSwift.logError(String(error))
-                completion(false)
-        })
+                if error.domain == NSURLErrorDomain && count < Defaults.maxRetries {
+                    self.getSettingsAttempt(count: count + 1)
+                } else {
+                    self.status = .failed
+                }
+            }
+        )
     }
 
-    func subscribeSettings(next: AccountSettings? -> Void) -> AccountSettingsSubscription {
-        return AccountSettingsSubscription(userID: userID, context: context, changed: { (managedSettings) -> Void in
-            let settings = managedSettings.map({ AccountSettings(managed: $0) })
-            next(settings)
-        })
+    func refreshSettings() {
+        guard status == .idle || status == .failed else {
+            return
+        }
+        status = .refreshing
+        getSettingsAttempt()
+        stallTimer = Timer.scheduledTimer(timeInterval: Defaults.stallTimeout,
+                                                       target: self,
+                                                       selector: #selector(AccountSettingsService.stallTimerFired),
+                                                       userInfo: nil,
+                                                       repeats: false)
     }
 
-    func saveChange(change: AccountSettingsChange) {
+    @objc func stallTimerFired() {
+        guard status == .refreshing else {
+            return
+        }
+        status = .stalled
+    }
+
+    func saveChange(_ change: AccountSettingsChange) {
         guard let reverse = try? applyChange(change) else {
             return
         }
@@ -49,89 +110,93 @@ struct AccountSettingsService {
             DDLogSwift.logError("Error saving account settings change \(error)")
             // TODO: show/return error to the user (@koke 2015-11-24)
             // What should be showing the error? Let's post a notification for now so something else can handle it
-            NSNotificationCenter.defaultCenter().postNotificationName(AccountSettingsServiceChangeSaveFailedNotification, object: error as NSError)
+            NotificationCenter.default.post(name: Foundation.Notification.Name(rawValue: AccountSettingsServiceChangeSaveFailedNotification), object: error as NSError)
         }
     }
 
-    private func applyChange(change: AccountSettingsChange) throws -> AccountSettingsChange {
-        guard let settings = accountSettingsWithID(userID) else {
+    func primarySiteNameForSettings(_ settings: AccountSettings) -> String? {
+        let service = BlogService(managedObjectContext: context)
+        let blog = service.blog(byBlogId: NSNumber(value: settings.primarySiteID))
+
+        return blog?.settings?.name
+    }
+
+    fileprivate func loadSettings() {
+        settings = accountSettingsWithID(self.userID)
+    }
+
+    @discardableResult fileprivate func applyChange(_ change: AccountSettingsChange) throws -> AccountSettingsChange {
+        guard let settings = managedAccountSettingsWithID(userID) else {
             DDLogSwift.logError("Tried to apply a change to nonexistent settings (ID: \(userID)")
-            throw Errors.NotFound
+            throw Errors.notFound
         }
 
         let reverse = settings.applyChange(change)
         settings.account.applyChange(change)
 
-        ContextManager.sharedInstance().saveContext(context)
+        ContextManager.sharedInstance().save(context)
+        loadSettings()
 
         return reverse
     }
 
-    private func updateSettings(settings: AccountSettings) {
-        if let managedSettings = accountSettingsWithID(userID) {
+    fileprivate func updateSettings(_ settings: AccountSettings) {
+        if let managedSettings = managedAccountSettingsWithID(userID) {
             managedSettings.updateWith(settings)
         } else {
             createAccountSettings(userID, settings: settings)
         }
 
-        ContextManager.sharedInstance().saveContext(context)
+        ContextManager.sharedInstance().save(context)
+        loadSettings()
     }
 
-    private func accountSettingsWithID(userID: Int) -> ManagedAccountSettings? {
-        let request = NSFetchRequest(entityName: ManagedAccountSettings.entityName)
+    fileprivate func accountSettingsWithID(_ userID: Int) -> AccountSettings? {
+        return managedAccountSettingsWithID(userID).map(AccountSettings.init)
+    }
+
+    fileprivate func managedAccountSettingsWithID(_ userID: Int) -> ManagedAccountSettings? {
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: ManagedAccountSettings.entityName)
         request.predicate = NSPredicate(format: "account.userID = %d", userID)
         request.fetchLimit = 1
-        let results = (try? context.executeFetchRequest(request) as! [ManagedAccountSettings]) ?? []
+        guard let results = (try? context.fetch(request)) as? [ManagedAccountSettings] else {
+            return nil
+        }
         return results.first
     }
 
-    private func createAccountSettings(userID: Int, settings: AccountSettings) {
+    fileprivate func createAccountSettings(_ userID: Int, settings: AccountSettings) {
         let accountService = AccountService(managedObjectContext: context)
-        guard let account = accountService.findAccountWithUserID(userID) else {
+        guard let account = accountService.findAccount(withUserID: NSNumber(value: userID)) else {
             DDLogSwift.logError("Tried to create settings for a missing account (ID: \(userID)): \(settings)")
             return
         }
 
-        let managedSettings = NSEntityDescription.insertNewObjectForEntityForName(ManagedAccountSettings.entityName, inManagedObjectContext: context) as! ManagedAccountSettings
-        managedSettings.updateWith(settings)
-        managedSettings.account = account
-    }
-
-    enum Errors: ErrorType {
-        case NotFound
-    }
-}
-
-class AccountSettingsSubscription {
-    private var subscription: NSObjectProtocol? = nil
-
-    init(userID: Int, context: NSManagedObjectContext, changed: ManagedAccountSettings? -> Void) {
-        subscription = NSNotificationCenter.defaultCenter().addObserverForName(NSManagedObjectContextDidSaveNotification, object: context, queue: NSOperationQueue.mainQueue()) {
-            [unowned self]
-            notification in
-            // FIXME: Inspect changed objects in notification instead of fetching for performance (@koke 2015-11-23)
-            let account = self.fetchAccount(userID, context: context)
-            changed(account)
-        }
-
-        let initial = fetchAccount(userID, context: context)
-        dispatch_async(dispatch_get_main_queue()) {
-            changed(initial)
+        if let managedSettings = NSEntityDescription.insertNewObject(forEntityName: ManagedAccountSettings.entityName, into: context) as? ManagedAccountSettings {
+            managedSettings.updateWith(settings)
+            managedSettings.account = account
         }
     }
 
-    private func fetchAccount(userID: Int, context: NSManagedObjectContext) -> ManagedAccountSettings? {
-        let request = NSFetchRequest(entityName: ManagedAccountSettings.entityName)
-        request.predicate = NSPredicate(format: "account.userID = %d", userID)
-        request.fetchLimit = 1
-        let results = (try? context.executeFetchRequest(request) as! [ManagedAccountSettings]) ?? []
-        return results.first
+    enum Errors: Error {
+        case notFound
     }
 
-    deinit {
-        if let subscription = subscription {
-            NSNotificationCenter.defaultCenter().removeObserver(subscription)
+    enum RefreshStatus {
+        case idle
+        case refreshing
+        case stalled
+        case failed
+
+        var errorMessage: String? {
+            switch self {
+            case .stalled:
+                return NSLocalizedString("We are having trouble loading data", comment: "Error message displayed when a refresh is taking longer than usual. The refresh hasn't failed and it might still succeed")
+            case .failed:
+                return NSLocalizedString("We had trouble loading data", comment: "Error message displayed when a refresh failed")
+            case .idle, .refreshing:
+                return nil
+            }
         }
     }
 }
-

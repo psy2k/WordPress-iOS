@@ -4,7 +4,6 @@
 #import <XCTest/XCTest.h>
 #import "Blog.h"
 #import "BlogServiceRemoteREST.h"
-#import "WordPressComApi.h"
 #import "WordPress-Swift.h"
 #import "WordPressTests-Swift.h"
 
@@ -15,6 +14,15 @@ static NSTimeInterval const TestExpectationTimeout = 5;
 
 @implementation BlogServiceRemoteRESTTests
 
+#pragma mark - Overriden Methods
+
+- (void)tearDown
+{
+    [super tearDown];
+    [OHHTTPStubs removeAllStubs];
+}
+
+
 #pragma mark - Checking multi author for a blog
 
 - (void)testThatCheckMultiAuthorForBlogWorks
@@ -22,7 +30,7 @@ static NSTimeInterval const TestExpectationTimeout = 5;
     Blog *blog = OCMStrictClassMock([Blog class]);
     OCMStub([blog dotComID]).andReturn(@10);
     
-    WordPressComApi *api = OCMStrictClassMock([WordPressComApi class]);
+    WordPressComRestApi *api = OCMStrictClassMock([WordPressComRestApi class]);
     BlogServiceRemoteREST *service = nil;
     
     NSString* url = [NSString stringWithFormat:@"v1.1/sites/%@/users", blog.dotComID];
@@ -32,36 +40,57 @@ static NSTimeInterval const TestExpectationTimeout = 5;
              success:[OCMArg isNotNil]
              failure:[OCMArg isNotNil]]);
     
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api siteID:blog.dotComID]);
+    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithWordPressComRestApi:api siteID:blog.dotComID]);
     
     [service checkMultiAuthorWithSuccess:^(BOOL isMultiAuthor) {}
                                  failure:^(NSError *error) {}];
 }
 
+#pragma mark - Synchronizing site details for a blog
 
-#pragma mark - Synchronizing options for a blog
-
-- (void)testThatSyncOptionForBlogWorks
+- (void)testThatSyncSiteDetailsForBlogWorks
 {
     Blog *blog = OCMStrictClassMock([Blog class]);
     OCMStub([blog dotComID]).andReturn(@10);
-    
-    WordPressComApi *api = OCMStrictClassMock([WordPressComApi class]);
+
+    WordPressComRestApi *api = OCMStrictClassMock([WordPressComRestApi class]);
     BlogServiceRemoteREST *service = nil;
-    
+
     NSString* url = [NSString stringWithFormat:@"v1.1/sites/%@", blog.dotComID];
-    
+
     OCMStub([api GET:[OCMArg isEqual:url]
           parameters:[OCMArg isNil]
              success:[OCMArg isNotNil]
              failure:[OCMArg isNotNil]]);
-    
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api siteID:blog.dotComID]);
-    
-    [service syncOptionsWithSuccess:^(NSDictionary *options) {}
-                            failure:^(NSError *error) {}];
+
+    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithWordPressComRestApi:api siteID:blog.dotComID]);
+
+    [service syncBlogWithSuccess:^(RemoteBlog *remoteBlog) {}
+                         failure:^(NSError *error) {}];
 }
 
+#pragma mark - Synchronizing post types for a blog
+
+- (void)testThatSyncPostTypesForBlogWorks
+{
+    Blog *blog = OCMStrictClassMock([Blog class]);
+    OCMStub([blog dotComID]).andReturn(@10);
+    
+    WordPressComRestApi *api = OCMStrictClassMock([WordPressComRestApi class]);
+    BlogServiceRemoteREST *service = nil;
+    
+    NSString* url = [NSString stringWithFormat:@"v1.1/sites/%@/post-types", blog.dotComID];
+    NSDictionary *parameters = @{@"context": @"edit"};
+    OCMStub([api GET:[OCMArg isEqual:url]
+          parameters:[OCMArg isEqual:parameters]
+             success:[OCMArg isNotNil]
+             failure:[OCMArg isNotNil]]);
+    
+    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithWordPressComRestApi:api siteID:blog.dotComID]);
+
+    [service syncPostTypesWithSuccess:^(NSArray<RemotePostType *> *postTypes) {}
+                              failure:^(NSError *error) {}];
+}
 
 #pragma mark - Synchronizing post formats for a blog
 
@@ -70,7 +99,7 @@ static NSTimeInterval const TestExpectationTimeout = 5;
     Blog *blog = OCMStrictClassMock([Blog class]);
     OCMStub([blog dotComID]).andReturn(@10);
     
-    WordPressComApi *api = OCMStrictClassMock([WordPressComApi class]);
+    WordPressComRestApi *api = OCMStrictClassMock([WordPressComRestApi class]);
     BlogServiceRemoteREST *service = nil;
     
     NSString* url = [NSString stringWithFormat:@"v1.1/sites/%@/post-formats", blog.dotComID];
@@ -80,7 +109,7 @@ static NSTimeInterval const TestExpectationTimeout = 5;
              success:[OCMArg isNotNil]
              failure:[OCMArg isNotNil]]);
     
-    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithApi:api siteID:blog.dotComID]);
+    XCTAssertNoThrow(service = [[BlogServiceRemoteREST alloc] initWithWordPressComRestApi:api siteID:blog.dotComID]);
     
     [service syncPostFormatsWithSuccess:^(NSDictionary *options) {}
                                 failure:^(NSError *error) {}];
@@ -92,28 +121,23 @@ static NSTimeInterval const TestExpectationTimeout = 5;
 - (void)testSyncBlogSettingsParsesCorrectlyEveryField
 {
     NSNumber *blogID                = @(123);
-    NSString *path                  = [NSString stringWithFormat:@"v1.1/sites/%@/settings", blogID];
-    NSString *mockResponse          = @"rest-site-settings.json";
-    
-    WordPressComApi *api            = [WordPressComApi anonymousApi];
-    BlogServiceRemoteREST *service  = [[BlogServiceRemoteREST alloc] initWithApi:api siteID:blogID];
+    NSString *endpoint              = [NSString stringWithFormat:@"v1.1/sites/%@/settings", blogID];
+    NSString *responsePath          = OHPathForFile(@"rest-site-settings.json", self.class);
+
+    WordPressComRestApi *api        = [[WordPressComRestApi alloc] initWithOAuthToken:nil userAgent:nil];
+    BlogServiceRemoteREST *service  = [[BlogServiceRemoteREST alloc] initWithWordPressComRestApi:api siteID:blogID];
     XCTAssertNotNil(service, @"Error while creating the new service");
-    
-    [OHHTTPStubs stubRequestsPassingTest:^BOOL(NSURLRequest *request) {
-        return [[request.URL absoluteString] containsString:path];
-    } withStubResponse:^OHHTTPStubsResponse *(NSURLRequest *request) {
-        NSString* fixture = OHPathForFile(mockResponse, self.class);
-        return [OHHTTPStubsResponse responseWithFileAtPath:fixture
-                                                statusCode:200 headers:@{@"Content-Type":@"application/json"}];
-    }];
+
+    [OHHTTPStubs stubRequestForEndpoint:endpoint withFileAtPath:responsePath];
 
     XCTestExpectation *expectation = [self expectationWithDescription:@"Site Settings"];
     
-    [service syncSettingsWithSuccess:^(RemoteBlogSettings *settings) {
+    [service syncBlogSettingsWithSuccess:^(RemoteBlogSettings *settings) {
         // General
         XCTAssertEqualObjects(settings.name, @"My Epic Blog", @"");
         XCTAssertEqualObjects(settings.tagline, @"Definitely, the best blog out there", @"");
-        XCTAssertEqualObjects(settings.privacy, @(1), @"");
+        XCTAssertEqualObjects(settings.privacy, @(1), @"Invalid Privacy Value");
+        XCTAssertEqualObjects(settings.languageID, @(31337), @"Invalid Language ID");
         
         // Writing
         XCTAssertEqualObjects(settings.defaultCategoryID, @(8), @"");

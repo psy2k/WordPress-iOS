@@ -1,16 +1,13 @@
 #import "Blog.h"
-#import "Post.h"
 #import "Comment.h"
 #import "WPAccount.h"
 #import "AccountService.h"
-#import "JetpackREST.h"
 #import "NSURL+IDN.h"
 #import "ContextManager.h"
 #import "Constants.h"
-#import "BlogSiteVisibilityHelper.h"
 #import "WordPress-Swift.h"
 #import "SFHFKeychainUtils.h"
-#import <WordPressApi/WordPressApi.h>
+#import "WPUserAgent.h"
 
 static NSInteger const ImageSizeSmallWidth = 240;
 static NSInteger const ImageSizeSmallHeight = 180;
@@ -19,17 +16,24 @@ static NSInteger const ImageSizeMediumHeight = 360;
 static NSInteger const ImageSizeLargeWidth = 640;
 static NSInteger const ImageSizeLargeHeight = 480;
 
+NSString * const BlogEntityName = @"Blog";
 NSString * const PostFormatStandard = @"standard";
+NSString * const ActiveModulesKeyPublicize = @"publicize";
+NSString * const ActiveModulesKeySharingButtons = @"sharedaddy";
+NSString * const OptionsKeyActiveModules = @"active_modules";
+NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled";
+
 
 @interface Blog ()
 
-@property (nonatomic, strong, readwrite) WPXMLRPCClient *api;
+@property (nonatomic, strong, readwrite) WordPressOrgXMLRPCApi *xmlrpcApi;
 @property (nonatomic, strong, readwrite) JetpackState *jetpack;
 
 @end
 
 @implementation Blog
 
+@dynamic accountForDefaultBlog;
 @dynamic blogID;
 @dynamic url;
 @dynamic xmlrpc;
@@ -41,6 +45,7 @@ NSString * const PostFormatStandard = @"standard";
 @dynamic tags;
 @dynamic comments;
 @dynamic connections;
+@dynamic domains;
 @dynamic themes;
 @dynamic media;
 @dynamic menus;
@@ -52,6 +57,7 @@ NSString * const PostFormatStandard = @"standard";
 @dynamic lastCommentsSync;
 @dynamic lastUpdateWarning;
 @dynamic options;
+@dynamic postTypes;
 @dynamic postFormats;
 @dynamic isActivated;
 @dynamic visible;
@@ -63,23 +69,25 @@ NSString * const PostFormatStandard = @"standard";
 @dynamic icon;
 @dynamic username;
 @dynamic settings;
+@dynamic planID;
+@dynamic planTitle;
+@dynamic sharingButtons;
+@dynamic capabilities;
 
-
-@synthesize api = _api;
 @synthesize isSyncingPosts;
 @synthesize isSyncingPages;
 @synthesize videoPressEnabled;
 @synthesize isSyncingMedia;
 @synthesize jetpack = _jetpack;
+@synthesize xmlrpcApi = _xmlrpcApi;
 
 #pragma mark - NSManagedObject subclass methods
 
 - (void)prepareForDeletion
 {
     [super prepareForDeletion];
-    
-    // Beware: Lazy getters below. Let's hit directly the ivar
-    [_api.operationQueue cancelAllOperations];
+
+    [_xmlrpcApi invalidateAndCancelTasks];
 }
 
 - (void)didTurnIntoFault
@@ -87,8 +95,7 @@ NSString * const PostFormatStandard = @"standard";
     [super didTurnIntoFault];
 
     // Clean up instance variables
-    self.api = nil;
-
+    self.xmlrpcApi = nil;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -207,7 +214,7 @@ NSString * const PostFormatStandard = @"standard";
         pendingComments = [self.managedObjectContext countForFetchRequest:request error:&error];
     } else {
         for (Comment *element in self.comments) {
-            if ( [@"hold" isEqualToString: element.status] ) {
+            if ( [CommentStatusPending isEqualToString:element.status] ) {
                 pendingComments++;
             }
         }
@@ -246,10 +253,22 @@ NSString * const PostFormatStandard = @"standard";
 }
 
 - (NSArray *)sortedPostFormatNames
-{
+{    
     return [[self sortedPostFormats] wp_map:^id(NSString *key) {
         return self.postFormats[key];
     }];
+}
+
+- (NSArray *)sortedConnections
+{
+    NSSortDescriptor *sortServiceDescriptor = [[NSSortDescriptor alloc] initWithKey:@"service"
+                                                                          ascending:YES
+                                                                           selector:@selector(localizedCaseInsensitiveCompare:)];
+    NSSortDescriptor *sortExternalNameDescriptor = [[NSSortDescriptor alloc] initWithKey:@"externalName"
+                                                                               ascending:YES
+                                                                                selector:@selector(caseInsensitiveCompare:)];
+    NSArray *sortDescriptors = @[sortServiceDescriptor, sortExternalNameDescriptor];
+    return [[self.connections allObjects] sortedArrayUsingDescriptors:sortDescriptors];
 }
 
 - (NSString *)defaultPostFormatText
@@ -313,15 +332,6 @@ NSString * const PostFormatStandard = @"standard";
     }
 }
 
-- (NSString *)textForCurrentSiteVisibility
-{
-    if (!self.settings.privacy) {
-        [BlogSiteVisibilityHelper textForSiteVisibility:SiteVisibilityUnknown];
-    }
-    return [BlogSiteVisibilityHelper textForSiteVisibility:[self.settings.privacy intValue]];
-}
-
-
 - (NSDictionary *)getImageResizeDimensions
 {
     CGSize smallSize, mediumSize, largeSize;
@@ -348,7 +358,7 @@ NSString * const PostFormatStandard = @"standard";
     [self didChangeValueForKey:@"xmlrpc"];
 
     // Reset the api client so next time we use the new XML-RPC URL
-    self.api = nil;
+    self.xmlrpcApi = nil;
 }
 
 - (NSString *)version
@@ -420,19 +430,81 @@ NSString * const PostFormatStandard = @"standard";
              If the logic for this changes that needs to be updated as well
              */
             return [self accountIsDefaultAccount];
+        case BlogFeaturePeople:
+            return [self supportsRestApi] && self.isListingUsersAllowed;
         case BlogFeatureWPComRESTAPI:
-            return [self restApi] != nil;
         case BlogFeatureStats:
-            return [self restApiForStats] != nil;
+            return [self supportsRestApi];
+        case BlogFeatureSharing:
+            return [self supportsSharing];
         case BlogFeatureCommentLikes:
         case BlogFeatureReblog:
         case BlogFeatureMentions:
         case BlogFeatureOAuth2Login:
-            return [self isHostedAtWPcom];
+        case BlogFeaturePlans:
+            return [self isHostedAtWPcom] && [self isAdmin];
         case BlogFeaturePushNotifications:
             return [self supportsPushNotifications];
         case BlogFeatureThemeBrowsing:
             return [self isHostedAtWPcom] && [self isAdmin];
+        case BlogFeatureMenus:
+            return [self supportsRestApi] && [self isAdmin];
+        case BlogFeaturePrivate:
+            // Private visibility is only supported by wpcom blogs
+            return [self isHostedAtWPcom];
+        case BlogFeatureSiteManagement:
+            return [self supportsSiteManagementServices];
+        case BlogFeatureDomains:
+            return [self isHostedAtWPcom] && [self supportsSiteManagementServices];
+        case BlogFeatureNoncePreviews:
+            return [self supportsRestApi] && ![self isHostedAtWPcom];
+        case BlogFeatureMediaMetadataEditing:
+            return [self supportsRestApi] && [self isAdmin];
+        case BlogFeatureMediaDeletion:
+            return [self isAdmin];
+    }
+}
+
+-(BOOL)supportsSharing
+{
+    return [self supportsPublicize] || [self supportsShareButtons];
+}
+
+- (BOOL)supportsPublicize
+{
+    // Publicize is only supported via REST
+    if (![self supports:BlogFeatureWPComRESTAPI]) {
+        return NO;
+    }
+
+    if (![self isPublishingPostsAllowed]) {
+        return NO;
+    }
+
+    if (self.isHostedAtWPcom) {
+        // For WordPress.com YES unless it's disabled
+        return ![[self getOptionValue:OptionsKeyPublicizeDisabled] boolValue];
+
+    } else {
+        // For Jetpack, check if the module is enabled
+        return [self jetpackPublicizeModuleEnabled];
+    }
+}
+
+- (BOOL)supportsShareButtons
+{
+    // Share Button settings are only supported via REST, and for admins
+    if (![self isAdmin] || ![self supports:BlogFeatureWPComRESTAPI]) {
+        return NO;
+    }
+
+    if (self.isHostedAtWPcom) {
+        // For WordPress.com YES
+        return YES;
+
+    } else {
+        // For Jetpack, check if the module is enabled
+        return [self jetpackSharingButtonsModuleEnabled];
     }
 }
 
@@ -453,6 +525,17 @@ NSString * const PostFormatStandard = @"standard";
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:self.managedObjectContext];
     WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
     return [defaultAccount isEqual:self.jetpackAccount];
+}
+
+- (nullable NSNumber *)siteID
+{
+    if (self.account) {
+        return self.dotComID;
+    }
+    else if (self.jetpackAccount && self.jetpack.siteID) {
+        return self.jetpack.siteID;
+    }
+    return nil;
 }
 
 - (NSNumber *)dotComID
@@ -478,7 +561,7 @@ NSString * const PostFormatStandard = @"standard";
 
 - (NSSet *)allowedFileTypes
 {
-    NSArray * allowedFileTypes = self.options[@"allowed_file_types"][@"value"];
+    NSArray *allowedFileTypes = [self.options arrayForKeyPath:@"allowed_file_types.value"];
     if (!allowedFileTypes || allowedFileTypes.count == 0) {
         return nil;
     }
@@ -493,6 +576,14 @@ NSString * const PostFormatStandard = @"standard";
     // Invalidate the Jetpack state since it's constructed from options
     self.jetpack = nil;
     [self didChangeValueForKey:@"options"];
+
+    self.siteVisibility = (SiteVisibility)([[self getOptionValue:@"blog_public"] integerValue]);
+    // HACK:Sergio Estevao (2015-08-31): Because there is no direct way to
+    // know if a user has permissions to change the options we check if the blog title property is read only or not.
+    // (Moved from BlogService, 2016-01-28 by aerych)
+    if ([self.options numberForKeyPath:@"blog_title.readonly"]) {
+        self.isAdmin = ![[self.options numberForKeyPath:@"blog_title.readonly"] boolValue];
+    }
 }
 
 + (NSSet *)keyPathsForValuesAffectingJetpack
@@ -504,7 +595,7 @@ NSString * const PostFormatStandard = @"standard";
 {
     NSString *extra = @"";
     if (self.account) {
-        extra = [NSString stringWithFormat:@" wp.com account: %@ blogId: %@", self.account ? self.account.username : @"NO", self.dotComID];
+        extra = [NSString stringWithFormat:@" wp.com account: %@ blogId: %@ plan: %@ (%@)", self.account ? self.account.username : @"NO", self.dotComID, self.planTitle, self.planID];
     } else if (self.jetpackAccount) {
         extra = [NSString stringWithFormat:@" jetpack: 🚀🚀 Jetpack %@ fully connected as %@ with site ID %@", self.jetpack.version, self.jetpackAccount.username, self.jetpack.siteID];
     } else {
@@ -515,41 +606,32 @@ NSString * const PostFormatStandard = @"standard";
 
 #pragma mark - api accessor
 
-- (WPXMLRPCClient *)api
+- (WordPressOrgXMLRPCApi *)xmlrpcApi
 {
-    if (_api == nil) {
-        _api = [[WPXMLRPCClient alloc] initWithXMLRPCEndpoint:[NSURL URLWithString:self.xmlrpc]];
-        // Enable compression for wp.com only, as some self hosted have connection issues
-        if ([self isHostedAtWPcom]) {
-            [_api setDefaultHeader:@"Accept-Encoding" value:@"gzip, deflate"];
-            [_api setAuthorizationHeaderWithToken:self.account.authToken];
+    NSURL *xmlRPCEndpoint = [NSURL URLWithString:self.xmlrpc];
+    if (_xmlrpcApi == nil) {
+        if (xmlRPCEndpoint != nil) {
+        _xmlrpcApi = [[WordPressOrgXMLRPCApi alloc] initWithEndpoint:xmlRPCEndpoint
+                                                                   userAgent:[WPUserAgent wordPressUserAgent]];
         }
     }
-    return _api;
+    return _xmlrpcApi;
 }
 
-- (WordPressComApi *)restApi
+- (WordPressComRestApi *)wordPressComRestApi
 {
     if (self.account) {
-        return self.account.restApi;
+        return self.account.wordPressComRestApi;
     } else if ([self jetpackRESTSupported]) {
-        return self.jetpackAccount.restApi;
+        return self.jetpackAccount.wordPressComRestApi;
     }
     return nil;
 }
 
-/*
- 2015-05-26 koke: this is a temporary method to check if a blog supports BlogFeatureStats.
- It works like restApi, but bypasses Jetpack REST checks, since we always want to use rest for Stats.
- */
-- (WordPressComApi *)restApiForStats
-{
-    if (self.account) {
-        return self.account.restApi;
-    } else if (self.jetpackAccount && self.dotComID) {
-        return self.jetpackAccount.restApi;
-    }
-    return nil;
+- (BOOL)supportsRestApi {
+    // We don't want to check for `restApi` as it can be `nil` when the token
+    // is missing from the keychain.
+    return (self.account || [self jetpackRESTSupported]);
 }
 
 #pragma mark - Jetpack
@@ -576,7 +658,23 @@ NSString * const PostFormatStandard = @"standard";
 
 - (BOOL)jetpackRESTSupported
 {
-    return JetpackREST.enabled && self.jetpackAccount && self.dotComID;
+    return self.jetpackAccount && self.dotComID;
+}
+
+- (BOOL)jetpackActiveModule:(NSString *)moduleName
+{
+    NSArray *activeModules = (NSArray *)[self getOptionValue:OptionsKeyActiveModules];
+    return [activeModules containsObject:moduleName] ?: NO;
+}
+
+- (BOOL)jetpackPublicizeModuleEnabled
+{
+    return [self jetpackActiveModule:ActiveModulesKeyPublicize];
+}
+
+- (BOOL)jetpackSharingButtonsModuleEnabled
+{
+    return [self jetpackActiveModule:ActiveModulesKeySharingButtons];
 }
 
 #pragma mark - Private Methods

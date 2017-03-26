@@ -1,6 +1,8 @@
 #import "TestContextManager.h"
 #import "ContextManager-Internals.h"
 
+
+
 @implementation TestContextManager
 
 @synthesize persistentStoreCoordinator = _persistentStoreCoordinator;
@@ -18,9 +20,11 @@
 {
     self = [super init];
     if (self) {
-        // Override the shared ContextManager to prevent Simperium from being used
+        // Override the shared ContextManager
         [ContextManager overrideSharedInstance:self];
+        _requiresTestExpectation = YES;
     }
+
     return self;
 }
 
@@ -80,7 +84,7 @@
         if (self.testExpectation) {
             [self.testExpectation fulfill];
             self.testExpectation = nil;
-        } else {
+        } else if (self.requiresTestExpectation) {
             NSLog(@"No test expectation present for context save");
         }
     }];
@@ -92,7 +96,7 @@
     if (self.testExpectation) {
         [self.testExpectation fulfill];
         self.testExpectation = nil;
-    } else {
+        } else if (self.requiresTestExpectation) {
         NSLog(@"No test expectation present for context save");
     }
 }

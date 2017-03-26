@@ -1,42 +1,44 @@
 import Foundation
 import WordPressShared.WPStyleGuide
 
-@objc public class NoteBlockImageTableViewCell : NoteBlockTableViewCell
-{
+
+class NoteBlockImageTableViewCell: NoteBlockTableViewCell {
     // MARK: - Public Properties
-    public override var isBadge: Bool {
+    fileprivate var imageURL: URL?
+    override var isBadge: Bool {
         didSet {
             backgroundColor = isBadge ? Styles.badgeBackgroundColor : Styles.blockBackgroundColor
         }
     }
-    
+
     // MARK: - Public Methods
-    public func downloadImageWithURL(url: NSURL?) {
-        if url == imageURL {
+
+    /// Downloads a remote image, given it's URL, assuming that we're already not displaying that very same image.
+    ///
+    /// - Parameter url: Target image URL.
+    ///
+    func downloadImage(_ url: URL?) {
+        guard imageURL != url else {
             return
         }
 
-        let success = { (image: UIImage) in
-            self.blockImageView.displayImageWithSpringAnimation(image)
-        }
-        
-        blockImageView.downloadImage(url, placeholderImage: nil, success: success, failure: nil)
-        
         imageURL = url
+
+        blockImageView.downloadImage(url, placeholderImage: nil, success: { image in
+            self.blockImageView.image = image
+            self.blockImageView.expandSpringAnimation()
+        })
     }
-    
+
     // MARK: - View Methods
-    public override func awakeFromNib() {
+    override func awakeFromNib() {
         super.awakeFromNib()
-        selectionStyle = .None
+        selectionStyle = .none
     }
-    
-    // MARK: - Private
-    private var imageURL:               NSURL?
-    
+
     // MARK: - Helpers
-    private typealias Styles = WPStyleGuide.Notifications
-    
+    fileprivate typealias Styles = WPStyleGuide.Notifications
+
     // MARK: - IBOutlets
-    @IBOutlet weak var blockImageView:  UIImageView!
+    @IBOutlet weak var blockImageView: UIImageView!
 }

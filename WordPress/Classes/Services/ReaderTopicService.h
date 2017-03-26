@@ -8,6 +8,7 @@ extern NSString * const ReaderTopicFreshlyPressedPathCommponent;
 @class ReaderAbstractTopic;
 @class ReaderTagTopic;
 @class ReaderSiteTopic;
+@class ReaderSearchTopic;
 
 @interface ReaderTopicService : LocalCoreDataService
 
@@ -26,6 +27,15 @@ extern NSString * const ReaderTopicFreshlyPressedPathCommponent;
 - (void)fetchReaderMenuWithSuccess:(void (^)())success failure:(void (^)(NSError *error))failure;
 
 /**
+ Get a list of ReaderSiteTopics of the sites the user follows.
+
+ @param success block called on a successful fetch.
+ @param failure block called if there is any error. `error` can be any underlying network error.
+ */
+- (void)fetchFollowedSitesWithSuccess:(void(^)())success
+                              failure:(void(^)(NSError *error))failure;
+
+/**
  Counts the number of `ReaderTagTopics` the user has subscribed to.
  
  @return The number of ReaderTagTopics whose `followed` property is set to `YES`
@@ -33,10 +43,21 @@ extern NSString * const ReaderTopicFreshlyPressedPathCommponent;
 - (NSUInteger)numberOfSubscribedTopics;
 
 /**
+ Deletes all search topics from core data and saves the context.
+ Use to clean-up searches when they are finished.
+ */
+- (void)deleteAllSearchTopics;
+
+/**
  Deletes all topics that do not appear in the menu from core data and saves the context.
  Use to clean-up previewed topics that are lingering in core data.
  */
 - (void)deleteNonMenuTopics;
+
+/**
+ Globally sets the `inUse` flag to fall for all posts.
+ */
+- (void)clearInUseFlags;
 
 /**
  Deletes all topics from core data and saves the context. Call when switching accounts.
@@ -54,6 +75,16 @@ extern NSString * const ReaderTopicFreshlyPressedPathCommponent;
  @param topic The ReaderAbstractTopic to follow and make current.
  */
 - (void)subscribeToAndMakeTopicCurrent:(ReaderAbstractTopic *)topic;
+
+/**
+ Creates a ReaderSearchTopic from the specified search phrase.
+ 
+ @param phrase: The search phrase.
+ 
+ @return A ReaderSearchTopic instance.
+ */
+- (ReaderSearchTopic *)searchTopicForSearchPhrase:(NSString *)phrase;
+
 
 /**
  Unfollows the specified topic. If the specified topic was the current topic the 
@@ -112,12 +143,34 @@ extern NSString * const ReaderTopicFreshlyPressedPathCommponent;
 - (void)toggleFollowingForSite:(ReaderSiteTopic *)topic success:(void (^)())success failure:(void (^)(NSError *error))failure;
 
 /**
+ Mark a site topic as unfollowed in core data only. Should be called after unfollowing
+ a post to ensure that any existing site topics reflect the correct following status.
 
+ @param feedURL The feedURL of the site topic.
+ */
+- (void)markUnfollowedSiteTopicWithFeedURL:(NSString *)feedURL;
+
+/**
+ Mark a site topic as unfollowed in core data only. Should be called after unfollowing
+ a post to ensure that any existing site topics reflect the correct following status.
+
+ @param siteID the siteID of the site topic.
+ */
+- (void)markUnfollowedSiteTopicWithSiteID:(NSNumber *)siteID;
+
+/**
  Fetch the topic for 'sites I follow' if it exists.
 
  @return A `ReaderAbstractTopic` instance or nil.
  */
 - (ReaderAbstractTopic *)topicForFollowedSites;
+
+/**
+ Fetch the topic for 'Discover' if it exists.
+
+ @return A `ReaderAbstractTopic` instance or nil.
+ */
+- (ReaderAbstractTopic *)topicForDiscover;
 
 /**
  Fetch a tag topic for a tag with the specified slug.
@@ -142,6 +195,16 @@ extern NSString * const ReaderTopicFreshlyPressedPathCommponent;
                         isFeed:(BOOL)isFeed
                        success:(void (^)(NSManagedObjectID *objectID, BOOL isFollowing))success
                        failure:(void (^)(NSError *error))failure;
+
+
+/**
+ Find a topic by its path.
+ 
+ @param path The path of the topic
+ 
+ @returns A matching abstract topic or nil.
+ */
+- (ReaderAbstractTopic *)findWithPath:(NSString *)path;
 
 @end
 

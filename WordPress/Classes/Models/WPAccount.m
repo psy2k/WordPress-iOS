@@ -1,9 +1,14 @@
 #import "WPAccount.h"
 #import "SFHFKeychainUtils.h"
-#import "WordPressComOAuthClient.h"
+#import "WordPress-Swift.h"
+
+static NSString * const WordPressComOAuthKeychainServiceName = @"public-api.wordpress.com";
 
 @interface WPAccount ()
-@property (nonatomic, strong, readwrite) WordPressComApi *restApi;
+
+@property (nonatomic, strong, readwrite) WordPressComRestApi *wordPressComRestApi;
+
+
 @end
 
 @implementation WPAccount
@@ -13,12 +18,14 @@
 @dynamic jetpackBlogs;
 @dynamic defaultBlog;
 @dynamic uuid;
+@dynamic dateCreated;
 @dynamic email;
+@dynamic emailVerified;
 @dynamic displayName;
 @dynamic userID;
 @dynamic avatarURL;
 @dynamic managedSettings;
-@synthesize restApi = _restApi;
+@synthesize wordPressComRestApi = _wordPressComRestApi;
 
 #pragma mark - NSManagedObject subclass methods
 
@@ -29,18 +36,15 @@
         return;
     }
 
-    // Beware: Lazy getters below. Let's hit directly the ivar
-    [_restApi.operationQueue cancelAllOperations];
-    [_restApi reset];
-    
+    [_wordPressComRestApi invalidateAndCancelTasks];
+    _wordPressComRestApi = nil;
     self.authToken = nil;
 }
 
 - (void)didTurnIntoFault
 {
     [super didTurnIntoFault];
-    
-    self.restApi = nil;
+    _wordPressComRestApi = nil;
 }
 
 #pragma mark - Custom accessors
@@ -87,6 +91,7 @@
                           forServiceName:WordPressComOAuthKeychainServiceName
                           updateExisting:YES
                                    error:&error];
+        
         if (error) {
             DDLogError(@"Error while updating WordPressComOAuthKeychainServiceName token: %@", error);
         }
@@ -102,7 +107,7 @@
     }
     
     // Make sure to release any RestAPI alloc'ed, since it might have an invalid token
-    _restApi = nil;
+    _wordPressComRestApi = nil;
 }
 
 - (NSArray *)visibleBlogs
@@ -115,21 +120,26 @@
     return [visibleBlogs sortedArrayUsingDescriptors:@[descriptor]];
 }
 
-#pragma mark - API Helpers
-
-- (WordPressComApi *)restApi
-{
-    if (!_restApi && self.authToken.length > 0) {
-        _restApi = [[WordPressComApi alloc] initWithOAuthToken:self.authToken];
+- (NSString *)verificationStatus {
+    if (!self.emailVerified) {
+        return @"unknown";
+    } else if ([self.emailVerified boolValue]) {
+        return @"verified";
+    } else {
+        return @"unverified";
     }
-    return _restApi;
 }
 
-#pragma mark - WordPress.com support methods
+#pragma mark - API Helpers
 
-- (BOOL)isWPComAccount
+- (WordPressComRestApi *)wordPressComRestApi
 {
-    return self.restApi != nil;
+    if (!_wordPressComRestApi && self.authToken.length > 0) {
+        _wordPressComRestApi = [[WordPressComRestApi alloc] initWithOAuthToken:self.authToken
+                                                                     userAgent: [WPUserAgent wordPressUserAgent]];
+    }
+    return _wordPressComRestApi;
+
 }
 
 @end

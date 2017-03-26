@@ -1,6 +1,5 @@
 #import "AccountService.h"
 #import "WPAccount.h"
-#import "NotificationsManager.h"
 #import "ContextManager.h"
 #import "Blog.h"
 #import "WPAnalyticsTrackerMixpanel.h"
@@ -80,7 +79,7 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
         [[NSNotificationCenter defaultCenter] postNotificationName:WPAccountDefaultWordPressComAccountChangedNotification object:accountInContext];
 
         [[PushNotificationsManager sharedInstance] registerForRemoteNotifications];
-        [[InteractiveNotificationsHandler sharedInstance] registerForUserNotifications];
+        [[InteractiveNotificationsManager sharedInstance] requestAuthorization];
     };
     if ([NSThread isMainThread]) {
         // This is meant to help with testing account observers.
@@ -126,8 +125,53 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     
     [WPAnalytics refreshMetadata];
     [[NSNotificationCenter defaultCenter] postNotificationName:WPAccountDefaultWordPressComAccountChangedNotification object:nil];
-
 }
+
+- (void)isEmailAvailable:(NSString *)email success:(void (^)(BOOL available))success failure:(void (^)(NSError *error))failure
+{
+    id<AccountServiceRemote> remote = [self remoteForAnonymous];
+    [remote isEmailAvailable:email success:^(BOOL available) {
+        if (success) {
+            success(available);
+        }
+    } failure:^(NSError *error) {
+        if (failure) {
+            failure(error);
+        }
+    }];
+}
+
+- (void)isUsernameAvailable:(NSString *)username
+                    success:(void (^)(BOOL available))success
+                    failure:(void (^)(NSError *error))failure
+{
+    id<AccountServiceRemote> remote = [self remoteForAnonymous];
+    [remote isUsernameAvailable:username success:^(BOOL available) {
+        if (success) {
+            success(available);
+        }
+    } failure:^(NSError *error) {
+        if (failure) {
+            failure(error);
+        }
+    }];
+}
+
+
+- (void)requestAuthenticationLink:(NSString *)email success:(void (^)())success failure:(void (^)(NSError *error))failure
+{
+    id<AccountServiceRemote> remote = [self remoteForAnonymous];
+    [remote requestWPComAuthLinkForEmail:email success:^{
+        if (success) {
+            success();
+        }
+    } failure:^(NSError *error) {
+        if (failure) {
+            failure(error);
+        }
+    }];
+}
+
 
 ///-----------------------
 /// @name Account creation
@@ -182,7 +226,7 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
 - (WPAccount *)findAccountWithUsername:(NSString *)username
 {
     NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:@"Account"];
-    [request setPredicate:[NSPredicate predicateWithFormat:@"username like %@", username]];
+    [request setPredicate:[NSPredicate predicateWithFormat:@"username =[c] %@", username]];
     [request setIncludesPendingChanges:YES];
 
     NSArray *results = [self.managedObjectContext executeFetchRequest:request error:nil];
@@ -210,6 +254,7 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
         // account.objectID can be temporary, so fetch via username/xmlrpc instead.
         WPAccount *fetchedAccount = [self findAccountWithUsername:username];
         [self updateAccount:fetchedAccount withUserDetails:remoteUser];
+        [self setupAppExtensionsWithDefaultAccount];
         dispatch_async(dispatch_get_main_queue(), ^{
             [WPAnalytics refreshMetadata];
         });
@@ -224,9 +269,18 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     }];
 }
 
+- (id<AccountServiceRemote>)remoteForAnonymous
+{
+    return [[AccountServiceRemoteREST alloc] initWithWordPressComRestApi:[AccountServiceRemoteREST anonymousWordPressComRestApi]];
+}
+
 - (id<AccountServiceRemote>)remoteForAccount:(WPAccount *)account
 {
-    return [[AccountServiceRemoteREST alloc] initWithApi:account.restApi];
+    if (account.wordPressComRestApi == nil) {
+        return nil;
+    }
+
+    return [[AccountServiceRemoteREST alloc] initWithWordPressComRestApi:account.wordPressComRestApi];
 }
 
 - (void)updateAccount:(WPAccount *)account withUserDetails:(RemoteUser *)userDetails
@@ -236,14 +290,67 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     account.email = userDetails.email;
     account.avatarURL = userDetails.avatarURL;
     account.displayName = userDetails.displayName;
+    account.dateCreated = userDetails.dateCreated;
+    account.emailVerified = @(userDetails.emailVerified);
     if (userDetails.primaryBlogID) {
-        account.defaultBlog = [[account.blogs filteredSetUsingPredicate:[NSPredicate predicateWithFormat:@"blogID = %@", userDetails.primaryBlogID]] anyObject];
-
-        NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-        BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-        [blogService flagBlogAsLastUsed:account.defaultBlog];
+        [self configurePrimaryBlogWithID:userDetails.primaryBlogID account:account];
     }
+    
     [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
+}
+
+- (void)configurePrimaryBlogWithID:(NSNumber *)primaryBlogID account:(WPAccount *)account
+{
+    NSParameterAssert(primaryBlogID);
+    NSParameterAssert(account);
+    
+    // Load the Default Blog
+    NSPredicate *predicate = [NSPredicate predicateWithFormat:@"blogID = %@", primaryBlogID];
+    Blog *defaultBlog = [[account.blogs filteredSetUsingPredicate:predicate] anyObject];
+    
+    if (!defaultBlog) {
+        DDLogError(@"Error: The Default Blog could not be loaded");
+        return;
+    }
+    
+    // Setup the Account
+    account.defaultBlog = defaultBlog;
+}
+
+- (void)setupAppExtensionsWithDefaultAccount
+{
+    WPAccount *defaultAccount = [self defaultWordPressComAccount];
+    Blog *defaultBlog = [defaultAccount defaultBlog];
+    NSNumber *siteId    = defaultBlog.dotComID;
+    NSString *blogName  = defaultBlog.settings.name;
+    
+    if (defaultBlog == nil || defaultBlog.isDeleted) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            TodayExtensionService *service = [TodayExtensionService new];
+            [service removeTodayWidgetConfiguration];
+
+            [ShareExtensionService removeShareExtensionConfiguration];
+        });
+    } else {
+        // Required Attributes
+        
+        BlogService *blogService    = [[BlogService alloc] initWithManagedObjectContext:self.managedObjectContext];
+        NSTimeZone *timeZone        = [blogService timeZoneForBlog:defaultBlog];
+        NSString *oauth2Token       = defaultAccount.authToken;
+        
+        dispatch_async(dispatch_get_main_queue(), ^{
+            TodayExtensionService *service = [TodayExtensionService new];
+            [service configureTodayWidgetWithSiteID:siteId
+                                           blogName:blogName
+                                       siteTimeZone:timeZone
+                                     andOAuth2Token:oauth2Token];
+
+            [ShareExtensionService configureShareExtensionDefaultSiteID:siteId.integerValue defaultSiteName:blogName];
+            [ShareExtensionService configureShareExtensionToken:defaultAccount.authToken];
+            [ShareExtensionService configureShareExtensionUsername:defaultAccount.username];
+        });
+    }
+    
 }
 
 - (void)purgeAccount:(WPAccount *)account

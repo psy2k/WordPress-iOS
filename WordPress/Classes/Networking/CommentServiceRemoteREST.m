@@ -1,10 +1,10 @@
 #import "CommentServiceRemoteREST.h"
-#import "WordPressComApi.h"
+#import "WordPress-Swift.h"
 #import "RemoteComment.h"
 #import "NSDate+WordPressJSON.h"
 #import <NSObject_SafeExpectations/NSObject+SafeExpectations.h>
 
-static const NSInteger NumberOfCommentsToSync = 100;
+
 
 @implementation CommentServiceRemoteREST
 
@@ -12,40 +12,42 @@ static const NSInteger NumberOfCommentsToSync = 100;
 
 #pragma mark - Blog-centric methods
 
-- (void)getCommentsWithSuccess:(void (^)(NSArray *))success
-                       failure:(void (^)(NSError *))failure
+- (void)getCommentsWithMaximumCount:(NSInteger)maximumComments
+                            success:(void (^)(NSArray *comments))success
+                            failure:(void (^)(NSError *error))failure
 {
-    [self getCommentsWithOptions:nil success:success failure:failure];
+    [self getCommentsWithMaximumCount:maximumComments options:nil success:success failure:failure];
 }
 
-- (void)getCommentsWithOptions:(NSDictionary *)options
-                       success:(void (^)(NSArray *posts))success
-                       failure:(void (^)(NSError *error))failure
+- (void)getCommentsWithMaximumCount:(NSInteger)maximumComments
+                            options:(NSDictionary *)options
+                            success:(void (^)(NSArray *posts))success
+                            failure:(void (^)(NSError *error))failure
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments", self.siteID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSMutableDictionary *parameters = [NSMutableDictionary dictionaryWithDictionary:@{
                                  @"status": @"all",
                                  @"context": @"edit",
-                                 @"number": @(NumberOfCommentsToSync)
+                                 @"number": @(maximumComments)
                                  }];
     if (options) {
         [parameters addEntriesFromDictionary:options];
     }
     
-    [self.api GET:requestUrl
-       parameters:parameters
-          success:^(AFHTTPRequestOperation *operation, id responseObject) {
-              if (success) {
-                  success([self remoteCommentsFromJSONArray:responseObject[@"comments"]]);
-              }
-          } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-              if (failure) {
-                  failure(error);
-              }
-          }];
+    [self.wordPressComRestApi GET:requestUrl
+                       parameters:parameters
+                          success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                              if (success) {
+                                  success([self remoteCommentsFromJSONArray:responseObject[@"comments"]]);
+                              }
+                          } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                              if (failure) {
+                                  failure(error);
+                              }
+                          }];
 
 }
 
@@ -63,25 +65,25 @@ static const NSInteger NumberOfCommentsToSync = 100;
     }
     
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{
                                  @"content": comment.content,
                                  @"context": @"edit",
                                  };
-    [self.api POST:requestUrl
-        parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               // TODO: validate response
-               RemoteComment *comment = [self remoteCommentFromJSONDictionary:responseObject];
-               if (success) {
-                   success(comment);
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:parameters
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               // TODO: validate response
+                               RemoteComment *comment = [self remoteCommentFromJSONDictionary:responseObject];
+                               if (success) {
+                                   success(comment);
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 - (void)updateComment:(RemoteComment *)comment
@@ -90,25 +92,25 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", self.siteID, comment.commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{
                                  @"content": comment.content,
                                  @"context": @"edit",
                                  };
-    [self.api POST:requestUrl
-        parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               // TODO: validate response
-               RemoteComment *comment = [self remoteCommentFromJSONDictionary:responseObject];
-               if (success) {
-                   success(comment);
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:parameters
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               // TODO: validate response
+                               RemoteComment *comment = [self remoteCommentFromJSONDictionary:responseObject];
+                               if (success) {
+                                   success(comment);
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 - (void)moderateComment:(RemoteComment *)comment
@@ -117,25 +119,25 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", self.siteID, comment.commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{
                                  @"status": [self remoteStatusWithStatus:comment.status],
                                  @"context": @"edit",
                                  };
-    [self.api POST:requestUrl
-        parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               // TODO: validate response
-               RemoteComment *comment = [self remoteCommentFromJSONDictionary:responseObject];
-               if (success) {
-                   success(comment);
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:parameters
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               // TODO: validate response
+                               RemoteComment *comment = [self remoteCommentFromJSONDictionary:responseObject];
+                               if (success) {
+                                   success(comment);
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 - (void)trashComment:(RemoteComment *)comment
@@ -144,19 +146,19 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/delete", self.siteID, comment.commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
-    [self.api POST:requestUrl
-        parameters:nil
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               if (success) {
-                   success();
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:nil
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               if (success) {
+                                   success();
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 
@@ -170,15 +172,15 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/replies?order=ASC&hierarchical=1&page=%d&number=%d", self.siteID, postID, page, number];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
 
-    [self.api GET:requestUrl parameters:nil success:^(AFHTTPRequestOperation *operation, id responseObject) {
+    [self.wordPressComRestApi GET:requestUrl parameters:nil success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
         if (success) {
             NSDictionary *dict = (NSDictionary *)responseObject;
             NSArray *comments = [self remoteCommentsFromJSONArray:[dict arrayForKey:@"comments"]];
             success(comments);
         }
-    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+    } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
         if (failure) {
             failure(error);
         }
@@ -195,23 +197,23 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{
         @"content": content,
         @"context": @"edit",
     };
-    [self.api POST:requestUrl
-        parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               if (success) {
-                   success();
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:parameters
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               if (success) {
+                                   success();
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 - (void)replyToPostWithID:(NSNumber *)postID
@@ -221,19 +223,19 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/posts/%@/replies/new", self.siteID, postID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{@"content": content};
     
-    [self.api POST:requestUrl
+    [self.wordPressComRestApi POST:requestUrl
         parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
+           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
                if (success) {
                    NSDictionary *commentDict = (NSDictionary *)responseObject;
                    RemoteComment *comment = [self remoteCommentFromJSONDictionary:commentDict];
                    success(comment);
                }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
                if (failure) {
                    failure(error);
                }
@@ -247,25 +249,25 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/replies/new", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{
         @"content": content,
         @"context": @"edit",
     };
-    [self.api POST:requestUrl
-        parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               if (success) {
-                   NSDictionary *commentDict = (NSDictionary *)responseObject;
-                   RemoteComment *comment = [self remoteCommentFromJSONDictionary:commentDict];
-                   success(comment);
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:parameters
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               if (success) {
+                                   NSDictionary *commentDict = (NSDictionary *)responseObject;
+                                   RemoteComment *comment = [self remoteCommentFromJSONDictionary:commentDict];
+                                   success(comment);
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 - (void)moderateCommentWithID:(NSNumber *)commentID
@@ -275,24 +277,24 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
     NSDictionary *parameters = @{
         @"status"   : status,
         @"context"  : @"edit",
     };
     
-    [self.api POST:requestUrl
-        parameters:parameters
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               if (success) {
-                   success();
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:parameters
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               if (success) {
+                                   success();
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 - (void)trashCommentWithID:(NSNumber *)commentID
@@ -301,19 +303,19 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/delete", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
-    [self.api POST:requestUrl
-        parameters:nil
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               if (success) {
-                   success();
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:nil
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               if (success) {
+                                   success();
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 - (void)likeCommentWithID:(NSNumber *)commentID
@@ -322,19 +324,19 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/likes/new", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
-    [self.api POST:requestUrl
-        parameters:nil
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               if (success) {
-                   success();
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:nil
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               if (success) {
+                                   success();
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 - (void)unlikeCommentWithID:(NSNumber *)commentID
@@ -343,19 +345,19 @@ static const NSInteger NumberOfCommentsToSync = 100;
 {
     NSString *path = [NSString stringWithFormat:@"sites/%@/comments/%@/likes/mine/delete", self.siteID, commentID];
     NSString *requestUrl = [self pathForEndpoint:path
-                                     withVersion:ServiceRemoteRESTApiVersion_1_1];
+                                     withVersion:ServiceRemoteWordPressComRESTApiVersion_1_1];
     
-    [self.api POST:requestUrl
-        parameters:nil
-           success:^(AFHTTPRequestOperation *operation, id responseObject) {
-               if (success) {
-                   success();
-               }
-           } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-               if (failure) {
-                   failure(error);
-               }
-           }];
+    [self.wordPressComRestApi POST:requestUrl
+                        parameters:nil
+                           success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
+                               if (success) {
+                                   success();
+                               }
+                           } failure:^(NSError *error, NSHTTPURLResponse *httpResponse) {
+                               if (failure) {
+                                   failure(error);
+                               }
+                           }];
 }
 
 

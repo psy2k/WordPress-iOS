@@ -13,7 +13,7 @@
 #import "WPStyleGuide+WebView.h"
 #import "WordPress-Swift.h"
 
-
+@import Gridicons;
 
 #pragma mark - Constants
 
@@ -31,6 +31,10 @@ static CGFloat const WPWebViewAnimationLongDuration         = 0.4;
 static CGFloat const WPWebViewAnimationAlphaVisible         = 1.0;
 static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
+static NSString *const WPComReferrerURL = @"https://wordpress.com";
+
+static NSString *const WPWebViewWebKitErrorDomain = @"WebKitErrorDomain";
+static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
 
 #pragma mark - Private Properties
 
@@ -38,8 +42,8 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
 @property (nonatomic,   weak) IBOutlet UIWebView                *webView;
 @property (nonatomic,   weak) IBOutlet UIProgressView           *progressView;
-@property (nonatomic, strong) IBOutlet UIBarButtonItem          *dismissButton;
-@property (nonatomic, strong) IBOutlet UIBarButtonItem          *optionsButton;
+@property (nonatomic, strong) UIBarButtonItem          *dismissButton;
+@property (nonatomic, strong) UIBarButtonItem          *optionsButton;
 
 @property (nonatomic,   weak) IBOutlet UIToolbar                *toolbar;
 @property (nonatomic,   weak) IBOutlet UIBarButtonItem          *backButton;
@@ -71,9 +75,7 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
     NSAssert(_webView,                 @"Missing Outlet!");
     NSAssert(_progressView,            @"Missing Outlet!");
-    NSAssert(_dismissButton,           @"Missing Outlet!");
-    NSAssert(_optionsButton,           @"Missing Outlet!");
-    
+
     NSAssert(_toolbar,                 @"Missing Outlet!");
     NSAssert(_backButton,              @"Missing Outlet!");
     NSAssert(_forwardButton,           @"Missing Outlet!");
@@ -86,11 +88,17 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
     self.navigationItem.titleView           = self.titleView;
     
     // Buttons
+    self.optionsButton = [[UIBarButtonItem alloc] initWithImage:[Gridicon iconOfType:GridiconTypeShareIOS] style:UIBarButtonItemStylePlain target:self action:@selector(showLinkOptions)];
+    self.dismissButton = [[UIBarButtonItem alloc] initWithImage:[Gridicon iconOfType:GridiconTypeCross] style:UIBarButtonItemStylePlain target:self action:@selector(dismiss)];
+
     self.optionsButton.accessibilityLabel   = NSLocalizedString(@"Share",   @"Spoken accessibility label");
     self.dismissButton.accessibilityLabel   = NSLocalizedString(@"Dismiss", @"Dismiss a view. Verb");
     self.backButton.accessibilityLabel      = NSLocalizedString(@"Back",    @"Previous web page");
     self.forwardButton.accessibilityLabel   = NSLocalizedString(@"Forward", @"Next web page");
     
+    self.backButton.image                   = [[Gridicon iconOfType:GridiconTypeChevronLeft] imageFlippedForRightToLeftLayoutDirection];
+    self.forwardButton.image                = [[Gridicon iconOfType:GridiconTypeChevronRight] imageFlippedForRightToLeftLayoutDirection];
+
     // Toolbar: Hidden by default!
     self.toolbar.barTintColor               = [UIColor whiteColor];
     self.backButton.tintColor               = [WPStyleGuide greyLighten10];
@@ -301,7 +309,7 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
 - (IBAction)showLinkOptions
 {
-    NSString* permaLink             = [self documentPermalink];
+    NSString *permaLink             = [self documentPermalink];
     NSString *title                 = [self documentTitle];
     NSMutableArray *activityItems   = [NSMutableArray array];
     
@@ -347,6 +355,18 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
         return NO;
     }
     
+    // To handle WhatsApp and Telegraph shares
+    // Even though the documentation says that canOpenURL will only return YES for
+    // URLs configured on the plist under LSApplicationQueriesSchemes if we don't filter
+    // out http requests it also returns YES for those
+    if (![request.URL.scheme hasPrefix:@"http"]
+        && [[UIApplication sharedApplication] canOpenURL:request.URL]) {
+        [[UIApplication sharedApplication] openURL:request.URL
+                                           options:nil
+                                 completionHandler:nil];
+        return NO;
+    }
+
     //  Note:
     //  UIWebView callbacks will get hit for every frame that gets loaded. As a workaround, we'll consider
     //  we're in a "loading" state just for the Top Level request.
@@ -388,6 +408,8 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
     // Don't show Ajax Cancelled or Frame Load Interrupted errors
     if (error.code == WPWebViewErrorAjaxCancelled || error.code == WPWebViewErrorFrameLoadInterrupted) {
+        return;
+    } else if ([error.domain isEqualToString:WPWebViewWebKitErrorDomain] && error.code == WPWebViewErrorPluginHandledLoad) {
         return;
     }
 
@@ -449,27 +471,42 @@ static CGFloat const WPWebViewAnimationAlphaHidden          = 0.0;
 
 - (NSURLRequest *)newRequestForWebsite
 {
-    NSString *userAgent = [[WordPressAppDelegate sharedInstance].userAgent wordPressUserAgent];
+    NSString *userAgent = [WPUserAgent wordPressUserAgent];
+    NSURLRequest *request;
     if (!self.needsLogin) {
-        return [WPURLRequest requestWithURL:self.url userAgent:userAgent];
+        request = [WPURLRequest requestWithURL:self.url userAgent:userAgent];
+    } else {
+        NSURL *loginURL = self.wpLoginURL ?: [self authUrlFromUrl:self.url];
+        request = [WPURLRequest requestForAuthenticationWithURL:loginURL
+                                                    redirectURL:self.url
+                                                       username:self.username
+                                                       password:self.password
+                                                    bearerToken:self.authToken
+                                                      userAgent:userAgent];
     }
-    
-    NSURL *loginURL = self.wpLoginURL;
-    
-    if (!loginURL) {
-        // Thank you, iOS 9, everything is more compact and pretty, now.
-        NSURLComponents *components = [NSURLComponents new];
-        components.scheme           = self.url.scheme;
-        components.host             = self.url.host;
-        components.path             = @"/wp-login.php";
-        loginURL                    = components.URL;
+
+    if (self.addsWPComReferrer) {
+        NSMutableURLRequest *mReq = [request isKindOfClass:[NSMutableURLRequest class]] ? (NSMutableURLRequest *)request : [request mutableCopy];
+        [mReq setValue:WPComReferrerURL forHTTPHeaderField:@"Referer"];
+        request = mReq;
     }
-    return [WPURLRequest requestForAuthenticationWithURL:loginURL
-                                             redirectURL:self.url
-                                                username:self.username
-                                                password:self.password
-                                             bearerToken:self.authToken
-                                               userAgent:userAgent];
+
+    return request;
+}
+
+- (NSURL *)authUrlFromUrl:(NSURL *)url
+{
+    // Note:
+    // WordPress CDN doesn't really deal with Auth. We'll replace `.files.wordpress.com` with `.wordpress`.
+    // Don't worry, we'll redirect the user to the pristine URL afterwards. Issue #4983
+    //
+    NSURLComponents *components = [NSURLComponents new];
+    components.scheme           = url.scheme;
+    components.host             = [url.host stringByReplacingOccurrencesOfString:@".files.wordpress.com"
+                                                                      withString:@".wordpress.com"];
+    components.path             = @"/wp-login.php";
+
+    return components.URL;
 }
 
 

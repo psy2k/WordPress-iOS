@@ -2,20 +2,23 @@
 /// different builds.
 @objc
 enum FeatureFlag: Int {
-    /// My Sites > Site > People
-    /// Development on hold while we focus on Me
-    case People
-    /// Me > My Profile
-    /// Needs better UI for loading/failed states
-    case MyProfile
+    case mediaLibrary
+    case nativeEditor
+    case exampleFeature
 
     /// Returns a boolean indicating if the feature is enabled
     var enabled: Bool {
         switch self {
-        case .People:
-            return build(.Debug)
-        case .MyProfile:
-            return build(.Debug, .Alpha, .Internal)
+        case .exampleFeature:
+            return true
+        case .mediaLibrary:
+            return build(.debug)
+        case .nativeEditor:
+            // At the moment this is only visible by default in non-app store builds
+            if build(.alpha, .debug, .internal) {
+                return true
+            }
+            return false
         }
     }
 }
@@ -25,7 +28,7 @@ enum FeatureFlag: Int {
 /// Since we can't expose properties on Swift enums we use a class instead
 class Feature: NSObject {
     /// Returns a boolean indicating if the feature is enabled
-    static func enabled(feature: FeatureFlag) -> Bool {
+    static func enabled(_ feature: FeatureFlag) -> Bool {
         return feature.enabled
     }
 }
@@ -33,13 +36,13 @@ class Feature: NSObject {
 /// Represents a build configuration.
 enum Build: Int {
     /// Development build, usually what you get when you run from Xcode
-    case Debug
+    case debug
     /// Daily buiilds released internally for Automattic employees
-    case Alpha
+    case alpha
     /// Beta released internally for Automattic employees
-    case Internal
+    case `internal`
     /// Production build released in the app store
-    case AppStore
+    case appStore
 
     /// Returns the current build type
     static var current: Build {
@@ -48,13 +51,13 @@ enum Build: Int {
         }
 
         #if DEBUG
-            return .Debug
+            return .debug
         #elseif ALPHA_BUILD
-            return .Alpha
+            return .alpha
         #elseif INTERNAL_BUILD
-            return .Internal
+            return .`internal`
         #else
-            return .AppStore
+            return .appStore
         #endif
     }
 
@@ -67,8 +70,8 @@ enum Build: Int {
 /// Example:
 ///
 ///     let enableExperimentalStuff = build(.Debug, .Internal)
-func build(any: Build...) -> Bool {
-    return any.reduce(false, combine: { previous, buildValue in
+func build(_ any: Build...) -> Bool {
+    return any.reduce(false, { previous, buildValue in
         previous || Build.current == buildValue
     })
 }

@@ -24,7 +24,6 @@
 - (NSString *)stringByReplacingHTMLEmoticonsWithEmoji;
 - (NSString *)stringByStrippingHTML;
 - (NSString *)stringByEllipsizingWithMaxLength:(NSInteger)lengthlimit preserveWords:(BOOL)preserveWords;
-- (NSString *)hostname;
 - (BOOL)isWordPressComPath;
 
 /**
@@ -34,5 +33,8 @@
  *  @return the number of words in a string
  */
 - (NSUInteger)wordCount;
+
+
+- (NSString *)stringByNormalizingWhitespace;
 
 @end

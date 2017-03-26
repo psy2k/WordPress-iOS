@@ -1,25 +1,24 @@
 import Foundation
 import WordPressShared.WPStyleGuide
 
-public class ReaderGapMarkerCell: UITableViewCell
-{
-    @IBOutlet private weak var innerContentView: UIView!
-    @IBOutlet private weak var tearBackgroundView: UIView!
-    @IBOutlet private weak var tearMaskView: UIView!
-    @IBOutlet private weak var activityViewBackgroundView: UIView!
-    @IBOutlet private weak var activityView: UIActivityIndicatorView!
-    @IBOutlet private weak var button:UIButton!
+open class ReaderGapMarkerCell: UITableViewCell {
+    @IBOutlet fileprivate weak var tearBackgroundView: UIView!
+    @IBOutlet fileprivate weak var tearMaskView: UIView!
+    @IBOutlet fileprivate weak var activityViewBackgroundView: UIView!
+    @IBOutlet fileprivate weak var activityView: UIActivityIndicatorView!
+    @IBOutlet fileprivate weak var button: UIButton!
 
-    public override func awakeFromNib() {
+    open override func awakeFromNib() {
         super.awakeFromNib()
         applyStyles()
     }
 
-    private func applyStyles() {
+    fileprivate func applyStyles() {
         // Background styles
-        selectedBackgroundView = UIView(frame: innerContentView.frame)
+        contentView.backgroundColor = WPStyleGuide.greyLighten30()
+        selectedBackgroundView = UIView(frame: contentView.frame)
         selectedBackgroundView?.backgroundColor = WPStyleGuide.greyLighten30()
-        innerContentView.backgroundColor = WPStyleGuide.greyLighten30()
+        contentView.backgroundColor = WPStyleGuide.greyLighten30()
         tearMaskView.backgroundColor = WPStyleGuide.greyLighten30()
 
         // Draw the tear
@@ -30,19 +29,18 @@ public class ReaderGapMarkerCell: UITableViewCell
         activityViewBackgroundView.layer.masksToBounds = true
 
         // Button style
-        let text = NSLocalizedString("Load more posts", comment: "A short label.  A call to action to load more posts.")
-        button.setTitle(text, forState: .Normal)
         WPStyleGuide.applyGapMarkerButtonStyle(button)
+        let text = NSLocalizedString("Load more posts", comment: "A short label.  A call to action to load more posts.")
+        button.setTitle(text, for: UIControlState())
         button.layer.cornerRadius = 4.0
         button.layer.masksToBounds = true
-        button.sizeToFit()
 
         // Disable button interactions so the full cell handles the tap.
-        button.userInteractionEnabled = false
+        button.isUserInteractionEnabled = false
     }
 
-    public func animateActivityView(animate:Bool) {
-        button.hidden = animate;
+    open func animateActivityView(_ animate: Bool) {
+        button.alpha = animate ? WPAlphaZero : WPAlphaFull
         if animate {
             activityView.startAnimating()
         } else {
@@ -50,10 +48,10 @@ public class ReaderGapMarkerCell: UITableViewCell
         }
     }
 
-    public override func setHighlighted(highlighted: Bool, animated: Bool) {
+    open override func setHighlighted(_ highlighted: Bool, animated: Bool) {
         super.setHighlighted(highlighted, animated: animated)
-
-        button.highlighted = highlighted
+        button.isHighlighted = highlighted
+        button.backgroundColor = highlighted ? WPStyleGuide.gapMarkerButtonBackgroundColorHighlighted() : WPStyleGuide.gapMarkerButtonBackgroundColor()
         if (highlighted) {
             // Redraw the backgrounds when highlighted
             drawTearBackground()

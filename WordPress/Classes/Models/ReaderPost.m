@@ -6,7 +6,6 @@
 #import "NSString+Helpers.h"
 #import "NSString+XMLExtensions.h"
 #import "WordPressAppDelegate.h"
-#import "WordPressComApi.h"
 #import "WPAccount.h"
 #import "WPAvatarSource.h"
 #import "WordPress-Swift.h"
@@ -35,7 +34,9 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 @dynamic isReblogged;
 @dynamic isWPCom;
 @dynamic likeCount;
+@dynamic score;
 @dynamic siteID;
+@dynamic sortRank;
 @dynamic sortDate;
 @dynamic summary;
 @dynamic comments;
@@ -54,6 +55,10 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 @dynamic wordCount;
 @dynamic readingTime;
 @dynamic crossPostMeta;
+@dynamic railcar;
+@dynamic inUse;
+
+@synthesize rendered;
 
 
 - (BOOL)isCrossPost
@@ -144,7 +149,7 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
     return ([content rangeOfString:featuredImage].location != NSNotFound);
 }
 
-#pragma mark - WPContentViewProvider protocol
+#pragma mark - PostContentProvider protocol
 
 - (NSString *)blogNameForDisplay
 {
@@ -163,11 +168,9 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
         } else {
             str = [NSString stringWithFormat:@"%@?s=%d&d=404", self.siteIconURL, size];
         }
-    } else {
-        NSString *hash = [[[NSURL URLWithString:self.blogURL] host] md5];
-        str = [NSString stringWithFormat:@"https://secure.gravatar.com/blavatar/%@/?s=%d&d=404", hash, size];
+        return [NSURL URLWithString:str];
     }
-    return [NSURL URLWithString:str];
+    return nil;
 }
 
 - (NSString *)titleForDisplay
@@ -186,7 +189,7 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 
 - (NSDate *)dateForDisplay
 {
-    return [self sortDate];
+    return [self dateCreated];
 }
 
 - (NSString *)contentPreviewForDisplay
@@ -285,6 +288,21 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 - (BOOL)isCommentCrossPost
 {
     return self.crossPostMeta.commentURL.length > 0;
+}
+
+- (NSDictionary *)railcarDictionary
+{
+    if (!self.railcar) {
+        return nil;
+    }
+
+    NSData *jsonData = [self.railcar dataUsingEncoding:NSUTF8StringEncoding];
+    NSError *error;
+    id jsonObj = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&error];
+    if ([jsonObj isKindOfClass:[NSDictionary class]]) {
+        return (NSDictionary *)jsonObj;
+    }
+    return nil;
 }
 
 

@@ -6,17 +6,16 @@
 #import "LocationService.h"
 #import "NSString+XMLExtensions.h"
 #import "NSString+Helpers.h"
-#import "Post.h"
 #import "Media.h"
 #import "PostFeaturedImageCell.h"
 #import "PostGeolocationCell.h"
 #import "PostGeolocationViewController.h"
 #import "SettingsSelectionViewController.h"
+#import "SharingDetailViewController.h"
 #import "PublishDatePickerView.h"
 #import "WPTextFieldTableViewCell.h"
 #import "WordPressAppDelegate.h"
 #import "WPTableViewActivityCell.h"
-#import "WPTableViewSectionHeaderFooterView.h"
 #import "WPTableImageSource.h"
 #import "ContextManager.h"
 #import "MediaService.h"
@@ -24,10 +23,14 @@
 #import "WPAndDeviceMediaLibraryDataSource.h"
 #import <WPMediaPicker/WPMediaPicker.h>
 #import <Photos/Photos.h>
+#import <Reachability/Reachability.h>
 #import "WPGUIConstants.h"
 #import "WordPress-Swift.h"
 
-typedef enum {
+@import Gridicons;
+@import WordPressShared;
+
+typedef NS_ENUM(NSInteger, PostSettingsRow) {
     PostSettingsRowCategories = 0,
     PostSettingsRowTags,
     PostSettingsRowPublishDate,
@@ -38,12 +41,15 @@ typedef enum {
     PostSettingsRowFeaturedImage,
     PostSettingsRowFeaturedImageAdd,
     PostSettingsRowFeaturedLoading,
-    PostSettingsRowGeolocationAdd,
-    PostSettingsRowGeolocationMap
-} PostSettingsRow;
+    PostSettingsRowShareConnection,
+    PostSettingsRowShareMessage,
+    PostSettingsRowGeolocation,
+    PostSettingsRowExcerpt
+};
 
 static CGFloat CellHeight = 44.0f;
 static NSInteger RowIndexForDatePicker = 0;
+static CGFloat LocationCellHeightToWidthAspectRatio = 0.5f;
 
 static NSString *const TableViewActivityCellIdentifier = @"TableViewActivityCellIdentifier";
 static NSString *const TableViewProgressCellIdentifier = @"TableViewProgressCellIdentifier";
@@ -54,53 +60,73 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 
 @property (nonatomic, strong) AbstractPost *apost;
 @property (nonatomic, strong) UITextField *passwordTextField;
+@property (nonatomic, strong) UIButton *passwordVisibilityButton;
 @property (nonatomic, strong) UITextField *tagsTextField;
 @property (nonatomic, strong) NSArray *visibilityList;
 @property (nonatomic, strong) NSArray *formatsList;
 @property (nonatomic, strong) WPTableImageSource *imageSource;
 @property (nonatomic, strong) UIImage *featuredImage;
 @property (nonatomic, strong) PublishDatePickerView *datePicker;
-@property (assign) BOOL *textFieldDidHaveFocusBeforeOrientationChange;
-@property (nonatomic, assign) BOOL *shouldHideStatusBar;
-@property (nonatomic, assign) BOOL *isUploadingMedia;
+@property (assign) BOOL textFieldDidHaveFocusBeforeOrientationChange;
+@property (nonatomic, assign) BOOL isUploadingMedia;
 @property (nonatomic, strong) NSProgress *featuredImageProgress;
 @property (nonatomic, strong) WPAndDeviceMediaLibraryDataSource *mediaDataSource;
+@property (nonatomic, strong) NSArray *publicizeConnections;
+
+@property (nonatomic, strong) PostGeolocationCell *postGeoLocationCell;
+@property (nonatomic, strong) WPTableViewCell *setGeoLocationCell;
+
+#pragma mark - Properties: Services
+
+@property (nonatomic, strong, readonly) BlogService *blogService;
+@property (nonatomic, strong, readonly) SharingService *sharingService;
+@property (nonatomic, strong, readonly) LocationService *locationService;
+
+#pragma mark - Properties: Reachability
+
+@property (nonatomic, strong, readwrite) Reachability *internetReachability;
 
 @end
 
 @implementation PostSettingsViewController
 
+#pragma mark - Initialization and dealloc
+
 - (void)dealloc
 {
+    [self.internetReachability stopNotifier];
+    
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self removePostPropertiesObserver];
 }
 
-- (instancetype)initWithPost:(AbstractPost *)aPost shouldHideStatusBar:(BOOL)shouldHideStatusBar
+- (instancetype)initWithPost:(AbstractPost *)aPost
 {
     self = [super initWithStyle:UITableViewStyleGrouped];
     if (self) {
         self.apost = aPost;
-        _shouldHideStatusBar = shouldHideStatusBar;
     }
     return self;
 }
 
+#pragma mark - UIViewController
+
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-
+    
     self.title = NSLocalizedString(@"Options", nil);
 
     DDLogInfo(@"%@ %@", self, NSStringFromSelector(_cmd));
 
-    [WPStyleGuide resetReadableMarginsForTableView:self.tableView];
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
 
     self.visibilityList = @[NSLocalizedString(@"Public", @"Privacy setting for posts set to 'Public' (default). Should be the same as in core WP."),
                            NSLocalizedString(@"Password protected", @"Privacy setting for posts set to 'Password protected'. Should be the same as in core WP."),
                            NSLocalizedString(@"Private", @"Privacy setting for posts set to 'Private'. Should be the same as in core WP.")];
-    self.formatsList = self.post.blog.sortedPostFormatNames;
+    
+    [self setupFormatsList];
+    [self setupPublicizeConnections];
 
     UITapGestureRecognizer *gestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissTagsKeyboardIfAppropriate:)];
     gestureRecognizer.cancelsTouchesInView = NO;
@@ -118,6 +144,15 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     self.tableView.contentInset = UIEdgeInsetsMake(-1.0f, 0, 0, 0);
     self.tableView.accessibilityIdentifier = @"SettingsTable";
     self.isUploadingMedia = NO;
+
+    NSManagedObjectContext *mainContext = [[ContextManager sharedInstance] mainContext];
+    _blogService = [[BlogService alloc] initWithManagedObjectContext:mainContext];
+    _locationService = [LocationService sharedService];
+    
+    // It's recommended to keep this call near the end of the initial setup, since we don't want
+    // reachability callbacks to trigger before such initial setup completes.
+    //
+    [self setupReachability];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -159,7 +194,94 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 - (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation
 {
     [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
-    [self reloadData];
+    //[self reloadData];
+}
+
+#pragma mark - Password Field
+
+- (void)togglePasswordVisibility
+{
+    NSAssert(_passwordTextField, @"The password text field should be set here.");
+    
+    self.passwordTextField.secureTextEntry = !self.passwordTextField.secureTextEntry;
+    [self refreshPasswordVisibilityButton];
+}
+
+- (void)refreshPasswordVisibilityButton
+{
+    NSAssert(_passwordTextField, @"The password text field should be set here.");
+    NSAssert(_passwordVisibilityButton, @"The password visibility button should be set here.");
+    
+    UIImage *icon;
+    BOOL passwordIsVisible = !self.passwordTextField.secureTextEntry;
+    
+    if (passwordIsVisible) {
+        icon = [Gridicon iconOfType:GridiconTypeVisible];
+    } else {
+        icon = [Gridicon iconOfType:GridiconTypeNotVisible];
+    }
+    
+    [self.passwordVisibilityButton setImage:icon forState:UIControlStateNormal];
+    [self.passwordVisibilityButton sizeToFit];
+}
+
+#pragma mark - Additional setup
+
+- (void)setupFormatsList
+{
+    self.formatsList = self.post.blog.sortedPostFormatNames;
+}
+
+- (void)setupPublicizeConnections
+{
+    self.publicizeConnections = self.post.blog.sortedConnections;
+}
+
+- (void)setupReachability
+{
+    self.internetReachability = [Reachability reachabilityForInternetConnection];
+    
+    __weak __typeof(self) weakSelf = self;
+    
+    self.internetReachability.reachableBlock = ^void(Reachability * reachability) {
+        [weakSelf internetIsReachableAgain];
+    };
+    
+    [self.internetReachability startNotifier];
+}
+
+#pragma mark - Reachability handling
+
+- (void)internetIsReachableAgain
+{
+    [self synchUnavailableData];
+}
+
+- (void)synchUnavailableData
+{
+    __weak __typeof(self) weakSelf = self;
+    
+    if (self.formatsList.count == 0) {
+        [self synchPostFormatsAndDo:^{
+            // DRM: if we ever start synchronizing anything else that could affect the table data
+            // aside from the post formats, we will need reload the table view only once all of the
+            // synchronization calls complete.
+            //
+            [[weakSelf tableView] reloadData];
+        }];
+    }
+}
+
+- (void)synchPostFormatsAndDo:(void(^)(void))completionBlock
+{
+    __weak __typeof(self) weakSelf = self;
+    
+    [self.blogService syncPostFormatsForBlog:self.apost.blog success:^{
+        [weakSelf setupFormatsList];
+        completionBlock();
+    } failure:^(NSError * _Nonnull error) {
+        completionBlock();
+    }];
 }
 
 #pragma mark - KVO
@@ -236,10 +358,6 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     [self.tableView reloadData];
 }
 
-- (void)datePickerChanged:(NSDate *)date
-{
-    self.apost.dateCreated = date;
-}
 
 #pragma mark - TextField Delegate Methods
 
@@ -286,15 +404,15 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 
 - (void)configureSections
 {
-    self.sections = [NSMutableArray array];
-    [self.sections addObject:[NSNumber numberWithInteger:PostSettingsSectionTaxonomy]];
-    [self.sections addObject:[NSNumber numberWithInteger:PostSettingsSectionMeta]];
-    [self.sections addObject:[NSNumber numberWithInteger:PostSettingsSectionFormat]];
-    [self.sections addObject:[NSNumber numberWithInteger:PostSettingsSectionFeaturedImage]];
-
-    if (self.post.blog.settings.geolocationEnabled || self.post.geolocation) {
-        [self.sections addObject:[NSNumber numberWithInteger:PostSettingsSectionGeolocation]];
-    }
+    self.sections = @[
+                      @(PostSettingsSectionTaxonomy),
+                      @(PostSettingsSectionMeta),
+                      @(PostSettingsSectionFormat),
+                      @(PostSettingsSectionFeaturedImage),
+                      @(PostSettingsSectionShare),
+                      @(PostSettingsSectionGeolocation),
+                      @(PostSettingsSectionMoreOptions)
+                      ];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
@@ -323,14 +441,21 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     } else if (sec == PostSettingsSectionFeaturedImage) {
         return 1;
 
+    } else if (sec == PostSettingsSectionShare) {
+        return [self numberOfRowsForShareSection];
+
     } else if (sec == PostSettingsSectionGeolocation) {
         return 1;
+
+    } else if (sec == PostSettingsSectionMoreOptions) {
+        return 1;
+
     }
 
     return 0;
 }
 
-- (NSString *)titleForHeaderInSection:(NSInteger)section
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
     NSInteger sec = [[self.sections objectAtIndex:section] integerValue];
     if (sec == PostSettingsSectionTaxonomy) {
@@ -345,43 +470,49 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     } else if (sec == PostSettingsSectionFeaturedImage) {
         return NSLocalizedString(@"Featured Image", @"Label for the Featured Image area in post settings.");
 
+    } else if (sec == PostSettingsSectionShare && [self numberOfRowsForShareSection] > 0) {
+        return NSLocalizedString(@"Sharing", @"Label for the Sharing section in post Settings. Should be the same as WP core.");
+
     } else if (sec == PostSettingsSectionGeolocation) {
-        return NSLocalizedString(@"Geolocation", @"Label for the geolocation feature (tagging posts by their physical location).");
+        return NSLocalizedString(@"Location", @"Label for the geolocation feature (tagging posts by their physical location).");
+        
+    } else if (sec == PostSettingsSectionMoreOptions) {
+        return NSLocalizedString(@"More Options", @"Label for the More Options area in post settings. Should use the same translation as core WP.");
 
     }
-    return @"";
+    return nil;
 }
 
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section
 {
-    WPTableViewSectionHeaderFooterView *header = [[WPTableViewSectionHeaderFooterView alloc] initWithReuseIdentifier:nil style:WPTableViewSectionStyleHeader];
-    header.title = [self titleForHeaderInSection:section];
-    return header;
+    [WPStyleGuide configureTableViewSectionHeader:view];
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
-    if (IS_IPAD && section == 0) {
-        return WPTableViewTopMargin;
+    if ([self tableView:tableView numberOfRowsInSection:section] == 0) {
+        return CGFLOAT_MIN;
+    } else {
+        return UITableViewAutomaticDimension;
     }
-
-    NSString *title = [self titleForHeaderInSection:section];
-    return [WPTableViewSectionHeaderFooterView heightForHeader:title width:CGRectGetWidth(self.view.bounds)];
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
 {
-    // Remove extra padding caused by section footers in grouped table views
-    return 1.0f;
+    if ([self tableView:tableView numberOfRowsInSection:section] == 0) {
+        return CGFLOAT_MIN;
+    } else {
+        return UITableViewAutomaticDimension;
+    }
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    CGFloat width = IS_IPAD ? WPTableViewFixedWidth : CGRectGetWidth(self.tableView.frame);
+    CGFloat width = CGRectGetWidth(self.tableView.frame);
     NSInteger sectionId = [[self.sections objectAtIndex:indexPath.section] integerValue];
 
-    if (sectionId == PostSettingsSectionGeolocation && [self post].geolocation) {
-        return ceilf(width * 0.75f);
+    if (sectionId == PostSettingsSectionGeolocation && self.post.geolocation != nil) {
+        return ceilf(width * LocationCellHeightToWidthAspectRatio);
     }
 
     if (sectionId == PostSettingsSectionFeaturedImage) {
@@ -420,8 +551,12 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         cell = [self configurePostFormatCellForIndexPath:indexPath];
     } else if (sec == PostSettingsSectionFeaturedImage) {
         cell = [self configureFeaturedImageCellForIndexPath:indexPath];
+    } else if (sec == PostSettingsSectionShare) {
+        cell = [self configureShareCellForIndexPath:indexPath];
     } else if (sec == PostSettingsSectionGeolocation) {
         cell = [self configureGeolocationCellForIndexPath:indexPath];
+    } else if (sec == PostSettingsSectionMoreOptions) {
+        cell = [self configureExcerptCellForIndexPath:indexPath];
     }
 
     return cell;
@@ -447,9 +582,24 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         [self showFeaturedImageSelector];
     } else if (cell.tag == PostSettingsRowFeaturedImageAdd) {
         [self showFeaturedImageSelector];
-    } else if (cell.tag == PostSettingsRowGeolocationAdd || cell.tag == PostSettingsRowGeolocationMap) {
+    } else if (cell.tag == PostSettingsRowShareConnection) {
+        [self toggleShareConnectionForIndexPath:indexPath];
+    } else if (cell.tag == PostSettingsRowShareMessage) {
+        [self showEditShareMessageController];
+    } else if (cell.tag == PostSettingsRowGeolocation) {
         [self showPostGeolocationSelector];
+    } else if (cell.tag == PostSettingsRowExcerpt) {
+        [self showEditExcerptController];
     }
+}
+
+- (NSInteger)numberOfRowsForShareSection
+{
+    if (self.apost.blog.supportsPublicize && self.publicizeConnections.count > 0) {
+        // One row per publicize connection plus an extra row for the publicze message
+        return self.publicizeConnections.count + 1;
+    }
+    return 0;
 }
 
 - (UITableViewCell *)configureTaxonomyCellForIndexPath:(NSIndexPath *)indexPath
@@ -458,7 +608,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 
     if (indexPath.row == PostSettingsRowCategories) {
         // Categories
-        cell = [self getWPTableViewCell];
+        cell = [self getWPTableViewDisclosureCell];
         cell.textLabel.text = NSLocalizedString(@"Categories", @"Label for the categories field. Should be the same as WP core.");
         cell.detailTextLabel.text = [NSString decodeXMLCharactersIn:[self.post categoriesText]];
         cell.tag = PostSettingsRowCategories;
@@ -466,7 +616,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 
     } else if (indexPath.row == PostSettingsRowTags) {
         // Tags
-        WPTextFieldTableViewCell *textCell = [self getTextFieldCell];
+        WPTextFieldTableViewCell *textCell = [self getWPTableViewTextFieldCell];
         textCell.textLabel.text = NSLocalizedString(@"Tags", @"Label for the tags field. Should be the same as WP core.");
         textCell.textField.text = self.post.tags;
         textCell.textField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:(NSLocalizedString(@"Comma separated", @"Placeholder text for the tags field. Should be the same as WP core.")) attributes:(@{NSForegroundColorAttributeName: [WPStyleGuide textFieldPlaceholderGrey]})];
@@ -487,18 +637,15 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     UITableViewCell *cell;
     if (indexPath.row == 0 && !self.datePicker) {
         // Publish date
-        cell = [self getWPTableViewCell];
-        if (self.apost.dateCreated) {
-            if ([self.apost isScheduled]) {
+        cell = [self getWPTableViewDisclosureCell];
+        if (self.apost.dateCreated && ![self.apost shouldPublishImmediately]) {
+            if ([self.apost hasFuturePublishDate]) {
                 cell.textLabel.text = NSLocalizedString(@"Scheduled for", @"Scheduled for [date]");
             } else {
                 cell.textLabel.text = NSLocalizedString(@"Published on", @"Published on [date]");
             }
 
-            NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-            [dateFormatter setDateStyle:NSDateFormatterMediumStyle];
-            [dateFormatter setTimeStyle:NSDateFormatterNoStyle];
-            cell.detailTextLabel.text = [dateFormatter stringFromDate:self.apost.dateCreated];
+            cell.detailTextLabel.text = [self.apost.dateCreated shortStringWithTime];
         } else {
             cell.textLabel.text = NSLocalizedString(@"Publish", @"");
             cell.detailTextLabel.text = NSLocalizedString(@"Immediately", @"");
@@ -509,7 +656,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         cell = [self getWPTableViewDatePickerCell];
     } else if (indexPath.row == 1) {
         // Publish Status
-        cell = [self getWPTableViewCell];
+        cell = [self getWPTableViewDisclosureCell];
         cell.textLabel.text = NSLocalizedString(@"Status", @"The status of the post. Should be the same as in core WP.");
         cell.accessibilityIdentifier = @"Status";
         cell.detailTextLabel.text = self.apost.statusTitle;
@@ -524,38 +671,64 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 
     } else if (indexPath.row == 2) {
         // Visibility
-        cell = [self getWPTableViewCell];
+        cell = [self getWPTableViewDisclosureCell];
         cell.textLabel.text = NSLocalizedString(@"Visibility", @"The visibility settings of the post. Should be the same as in core WP.");
         cell.detailTextLabel.text = [self titleForVisibility];
         cell.tag = PostSettingsRowVisibility;
         cell.accessibilityIdentifier = @"Visibility";
 
     } else {
-        // Password
-        WPTextFieldTableViewCell *textCell = [self getTextFieldCell];
-        textCell.textLabel.text = NSLocalizedString(@"Password", @"Label for the tags field. Should be the same as WP core.");
-        textCell.textField.text = self.apost.password;
-        textCell.textField.attributedPlaceholder = nil;
-        textCell.textField.placeholder = NSLocalizedString(@"Enter a password", @"");
-        textCell.textField.clearButtonMode = UITextFieldViewModeWhileEditing;
-        textCell.textField.secureTextEntry = YES;
-
-        cell = textCell;
-        cell.tag = PostSettingsRowPassword;
-        
-        self.passwordTextField = textCell.textField;
-        self.passwordTextField.accessibilityIdentifier = @"Password Value";
+        cell = [self configurePasswordCell];
     }
 
     return cell;
 }
 
+- (UITableViewCell *)configurePasswordCell
+{
+    // Password
+    WPTextFieldTableViewCell *textCell = [self getWPTableViewTextFieldCell];
+    textCell.textLabel.text = NSLocalizedString(@"Password", @"Label for the tags field. Should be the same as WP core.");
+    textCell.textField.text = self.apost.password;
+    textCell.textField.attributedPlaceholder = nil;
+    textCell.textField.placeholder = NSLocalizedString(@"Enter a password", @"");
+    textCell.textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    textCell.textField.secureTextEntry = YES;
+    
+    textCell.tag = PostSettingsRowPassword;
+    
+    self.passwordTextField = textCell.textField;
+    self.passwordTextField.accessibilityIdentifier = @"Password Value";
+    
+    [self configureVisibilityButtonForPasswordCell:textCell];
+    
+    return textCell;
+}
+
+- (void)configureVisibilityButtonForPasswordCell:(WPTextFieldTableViewCell *)textCell
+{
+    self.passwordVisibilityButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.passwordVisibilityButton.tintColor = [WPStyleGuide greyLighten10];
+    [self.passwordVisibilityButton addTarget:self action:@selector(togglePasswordVisibility) forControlEvents:UIControlEventTouchUpInside];
+    
+    [self refreshPasswordVisibilityButton];
+    
+    textCell.accessoryView = self.passwordVisibilityButton;
+}
+
 - (UITableViewCell *)configurePostFormatCellForIndexPath:(NSIndexPath *)indexPath
 {
-    UITableViewCell *cell = [self getWPTableViewCell];
+    UITableViewCell *cell = [self getWPTableViewDisclosureCell];
 
     cell.textLabel.text = NSLocalizedString(@"Post Format", @"The post formats available for the post. Should be the same as in core WP.");
-    cell.detailTextLabel.text = self.post.postFormatText;
+    
+    if (self.post.postFormatText.length > 0) {
+        cell.detailTextLabel.text = self.post.postFormatText;
+    } else {
+        cell.detailTextLabel.text = NSLocalizedString(@"Unavailable",
+                                                      @"Message to show in the post-format cell when the post format is not available");
+    }
+    
     cell.tag = PostSettingsRowFormat;
     cell.accessibilityIdentifier = @"Post Format";
     return cell;
@@ -566,7 +739,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     UITableViewCell *cell;
 
     if (!self.apost.post_thumbnail && !self.isUploadingMedia) {
-        WPTableViewActivityCell *activityCell = [self getWPActivityTableViewCell];
+        WPTableViewActivityCell *activityCell = [self getWPTableViewActivityCell];
         activityCell.textLabel.text = NSLocalizedString(@"Set Featured Image", @"");
         activityCell.tag = PostSettingsRowFeaturedImageAdd;
 
@@ -606,58 +779,111 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     return cell;
 }
 
+- (UITableViewCell *)configureShareCellForIndexPath:(NSIndexPath *)indexPath
+{
+    UITableViewCell *cell;
+    BOOL canEditSharing = [self.post canEditPublicizeSettings];
+
+    if (indexPath.row < self.publicizeConnections.count) {
+        cell = [self getWPTableViewImageAndAccessoryCell];
+        PublicizeConnection *connection = self.publicizeConnections[indexPath.row];
+        UIImage *image = [WPStyleGuide iconForService: connection.service];
+        [cell.imageView setImage:image];
+        if (canEditSharing) {
+            cell.imageView.tintColor = [WPStyleGuide tintColorForConnectedService: connection.service];
+        }
+        cell.textLabel.text = connection.externalDisplay;
+        cell.textLabel.enabled = canEditSharing;
+        if (connection.isBroken) {
+            cell.accessoryView = [WPStyleGuide sharingCellWarningAccessoryImageView];
+        } else {
+            UISwitch *switchAccessory = [[UISwitch alloc] initWithFrame:CGRectZero];
+            // This interaction is handled at a cell level
+            switchAccessory.userInteractionEnabled = NO;
+            switchAccessory.on = ![self.post publicizeConnectionDisabledForKeyringID:connection.keyringConnectionID];
+            switchAccessory.enabled = canEditSharing;
+            cell.accessoryView = switchAccessory;
+        }
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.tag = PostSettingsRowShareConnection;
+        cell.accessibilityIdentifier = [NSString stringWithFormat:@"%@ %@", connection.service, connection.externalDisplay];
+    } else {
+        cell = [self getWPTableViewDisclosureCell];
+        cell.textLabel.text = NSLocalizedString(@"Message", @"Label for the share message field on the post settings.");
+        cell.textLabel.enabled = canEditSharing;
+        cell.detailTextLabel.text = self.post.publicizeMessage ? self.post.publicizeMessage : self.post.titleForDisplay;
+        cell.detailTextLabel.enabled = canEditSharing;
+        cell.tag = PostSettingsRowShareMessage;
+        cell.accessibilityIdentifier = @"Customize the message";
+    }
+    cell.userInteractionEnabled = canEditSharing;
+    return cell;
+}
+
+- (PostGeolocationCell *)postGeoLocationCell {
+    if (!_postGeoLocationCell) {
+        _postGeoLocationCell = [[PostGeolocationCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+            _postGeoLocationCell.tag = PostSettingsRowGeolocation;
+    }
+    Coordinate *coordinate = self.post.geolocation;
+    NSString *address = NSLocalizedString(@"Finding your location...", @"Geo-tagging posts, status message when geolocation is found.");
+    if (coordinate) {
+        CLLocation *postLocation = [[CLLocation alloc] initWithLatitude:coordinate.latitude longitude:coordinate.longitude];
+        if ([self.locationService hasAddressForLocation:postLocation]) {
+            address = self.locationService.lastGeocodedAddress;
+        } else {
+            address = NSLocalizedString(@"Looking up address...", @"Used with posts that are geo-tagged. Let's the user know the the app is looking up the address for the coordinates tagging the post.");
+            __weak __typeof__(self) weakSelf = self;
+            [self.locationService getAddressForLocation:postLocation
+                                                        completion:^(CLLocation *location, NSString *address, NSError *error) {
+                                                            [weakSelf.tableView reloadData];
+                                                        }];
+            
+        }
+    }
+    [_postGeoLocationCell setCoordinate:coordinate andAddress:address];
+    return _postGeoLocationCell;
+}
+
+- (WPTableViewCell *)setGeoLocationCell {
+    if (!_setGeoLocationCell) {
+        _setGeoLocationCell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+        _setGeoLocationCell.accessoryType = UITableViewCellAccessoryNone;
+        _setGeoLocationCell.textLabel.text = NSLocalizedString(@"Set Location", @"Label for cell that allow users to set the location of a post");
+        _setGeoLocationCell.tag = PostSettingsRowGeolocation;
+        _setGeoLocationCell.textLabel.textAlignment = NSTextAlignmentCenter;
+        [WPStyleGuide configureTableViewActionCell:_setGeoLocationCell];
+    }
+    return _setGeoLocationCell;
+}
+
 - (UITableViewCell *)configureGeolocationCellForIndexPath:(NSIndexPath *)indexPath
 {
     WPTableViewCell *cell;
     if (self.post.geolocation == nil) {
-        WPTableViewActivityCell *actCell = [self getWPActivityTableViewCell];
-
-        actCell.tag = PostSettingsRowGeolocationAdd;
-
-        if ([[LocationService sharedService] locationServiceRunning]) {
-            [actCell.spinner startAnimating];
-            actCell.textLabel.text = NSLocalizedString(@"Finding your location...", @"Geo-tagging posts, status message when geolocation is found.");
-        } else {
-            actCell.textLabel.text = NSLocalizedString(@"Set Location", @"Geolocation feature to set the location.");
-            [actCell.spinner stopAnimating];
-        }
-
-        cell = actCell;
-
+        return self.setGeoLocationCell;
     } else {
-        static NSString *wpPostSettingsGeoCellIdentifier = @"wpPostSettingsGeoCellIdentifier";
-        PostGeolocationCell *geoCell = [self.tableView dequeueReusableCellWithIdentifier:wpPostSettingsGeoCellIdentifier];
-        if (!geoCell) {
-            geoCell = [[PostGeolocationCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:wpPostSettingsGeoCellIdentifier];
-        }
-
-        Coordinate *coordinate = self.post.geolocation;
-        CLLocation *postLocation = [[CLLocation alloc] initWithLatitude:coordinate.latitude longitude:coordinate.longitude];
-        NSString *address;
-        if ([[LocationService sharedService] hasAddressForLocation:postLocation]) {
-            address = [LocationService sharedService].lastGeocodedAddress;
-        } else {
-            address = NSLocalizedString(@"Looking up address...", @"Used with posts that are geo-tagged. Let's the user know the the app is looking up the address for the coordinates tagging the post.");
-            [[LocationService sharedService] getAddressForLocation:postLocation
-                                                        completion:^(CLLocation *location, NSString *address, NSError *error) {
-                                                            [self.tableView reloadData];
-                                                        }];
-
-        }
-        [geoCell setCoordinate:self.post.geolocation andAddress:address];
-        cell = geoCell;
-        cell.tag = PostSettingsRowGeolocationMap;
-
+        return self.postGeoLocationCell;
     }
     return cell;
 }
 
-- (WPTableViewCell *)getWPTableViewCell
+- (UITableViewCell *)configureExcerptCellForIndexPath:(NSIndexPath *)indexPath
 {
-    static NSString *wpTableViewCellIdentifier = @"wpTableViewCellIdentifier";
-    WPTableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:wpTableViewCellIdentifier];
+    WPTableViewCell *cell = [self getWPTableViewDisclosureCell];
+    cell.textLabel.text = NSLocalizedString(@"Excerpt", @"Label for the excerpt field. Should be the same as WP core.");
+    cell.detailTextLabel.text = self.apost.mt_excerpt;
+    cell.tag = PostSettingsRowExcerpt;
+    cell.accessibilityIdentifier = @"Excerpt";
+    return cell;
+}
+
+- (WPTableViewCell *)getWPTableViewDisclosureCell
+{
+    static NSString *WPTableViewDisclosureCellIdentifier = @"WPTableViewDisclosureCellIdentifier";
+    WPTableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:WPTableViewDisclosureCellIdentifier];
     if (!cell) {
-        cell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:wpTableViewCellIdentifier];
+        cell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:WPTableViewDisclosureCellIdentifier];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         [WPStyleGuide configureTableViewCell:cell];
     }
@@ -665,12 +891,26 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     return cell;
 }
 
+- (WPTableViewCell *)getWPTableViewImageAndAccessoryCell
+{
+    static NSString *WPTableViewImageAndAccesoryCellIdentifier = @"WPTableViewImageAndAccesoryCellIdentifier";
+    WPTableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:WPTableViewImageAndAccesoryCellIdentifier];
+    if (!cell) {
+        cell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:WPTableViewImageAndAccesoryCellIdentifier];
+        [WPStyleGuide configureTableViewCell:cell];
+    }
+    cell.accessoryView = nil;
+    cell.imageView.image = nil;
+    cell.tag = 0;
+    return cell;
+}
+
 - (WPTableViewCell *)getWPTableViewDatePickerCell
 {
-    static NSString *wpTableViewCellIdentifier = @"wpTableViewDatePickerCellIdentifier";
-    WPTableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:wpTableViewCellIdentifier];
+    static NSString *WPTableViewDatePickerCellIdentifier = @"WPTableViewDatePickerCellIdentifier";
+    WPTableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:WPTableViewDatePickerCellIdentifier];
     if (!cell) {
-        cell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:wpTableViewCellIdentifier];
+        cell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:WPTableViewDatePickerCellIdentifier];
         cell.accessoryType = UITableViewCellAccessoryNone;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         [WPStyleGuide configureTableViewCell:cell];
@@ -683,7 +923,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     return cell;
 }
 
-- (WPTableViewActivityCell *)getWPActivityTableViewCell
+- (WPTableViewActivityCell *)getWPTableViewActivityCell
 {
     WPTableViewActivityCell *cell = [self.tableView dequeueReusableCellWithIdentifier:TableViewActivityCellIdentifier];
     cell.accessoryType = UITableViewCellAccessoryNone;
@@ -694,16 +934,20 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     return cell;
 }
 
-- (WPTextFieldTableViewCell *)getTextFieldCell
+- (WPTextFieldTableViewCell *)getWPTableViewTextFieldCell
 {
-    static NSString *textFieldCellIdentifier = @"textFieldCellIdentifier";
-    WPTextFieldTableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:textFieldCellIdentifier];
+    static NSString *WPTextFieldCellIdentifier = @"WPTextFieldCellIdentifier";
+    WPTextFieldTableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:WPTextFieldCellIdentifier];
     if (!cell) {
-        cell = [[WPTextFieldTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:textFieldCellIdentifier];
+        cell = [[WPTextFieldTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:WPTextFieldCellIdentifier];
         cell.textField.returnKeyType = UIReturnKeyDone;
         cell.textField.delegate = self;
         [WPStyleGuide configureTableViewTextCell:cell];
-        cell.textField.textAlignment = NSTextAlignmentRight;
+        if ([self.view userInterfaceLayoutDirection] == UIUserInterfaceLayoutDirectionLeftToRight) {
+            cell.textField.textAlignment = NSTextAlignmentRight;
+        } else {
+            cell.textField.textAlignment = NSTextAlignmentLeft;
+        }
     }
     cell.tag = 0;
     return cell;
@@ -737,8 +981,8 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         frame.size.width = WPTableViewFixedWidth;
     } else {
         frame.size.width = CGRectGetWidth(self.tableView.bounds);
-        self.datePicker.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     }
+    self.datePicker.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     self.datePicker.frame = frame;
 
     NSUInteger sec = [self.sections indexOfObject:[NSNumber numberWithInteger:PostSettingsSectionMeta]];
@@ -754,11 +998,11 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 
     NSArray *statuses = [self.apost availableStatusesForEditing];
     NSArray *titles = [statuses wp_map:^id(NSString *status) {
-        return [BasePost titleForStatus:status];
+        return [AbstractPost titleForStatus:status];
     }];
 
     NSDictionary *statusDict = @{
-                                 @"DefaultValue": PostStatusPublish,
+                                 @"DefaultValue": [self.apost availableStatusForPublishOrScheduled],
                                  @"Title" : NSLocalizedString(@"Status", nil),
                                  @"Titles" : titles,
                                  @"Values" : statuses,
@@ -839,20 +1083,28 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     Post *post      = self.post;
     NSArray *titles = post.blog.sortedPostFormatNames;
 
+    if (![self.internetReachability isReachable] && self.formatsList.count == 0) {
+        [self showCantShowPostFormatsAlert];
+        return;
+    }
+    
     if (post == nil || titles.count == 0 || post.postFormatText == nil || self.formatsList.count == 0) {
         return;
     }
-
-    NSDictionary *postFormatsDict = @{
-        @"DefaultValue"   : [titles firstObject],
-        @"Title"          : NSLocalizedString(@"Post Format", nil),
-        @"Titles"         : titles,
-        @"Values"         : titles,
-        @"CurrentValue"   : post.postFormatText
+    NSDictionary *(^postFormatsDictionary)(NSArray *) = ^NSDictionary *(NSArray *titles) {
+        return @{
+                 SettingsSelectionDefaultValueKey   : [titles firstObject],
+                 SettingsSelectionTitleKey          : NSLocalizedString(@"Post Format", nil),
+                 SettingsSelectionTitlesKey         : titles,
+                 SettingsSelectionValuesKey         : titles,
+                 SettingsSelectionCurrentValueKey   : post.postFormatText
+                 };;
     };
 
-    SettingsSelectionViewController *vc = [[SettingsSelectionViewController alloc] initWithDictionary:postFormatsDict];
+    SettingsSelectionViewController *vc = [[SettingsSelectionViewController alloc] initWithDictionary:postFormatsDictionary(titles)];
     __weak SettingsSelectionViewController *weakVc = vc;
+    __weak __typeof(self) weakSelf = self;
+    __weak Post *weakPost = post;
     vc.onItemSelected = ^(NSString *status) {
         // Check if the object passed is indeed an NSString, otherwise we don't want to try to set it as the post format
         if ([status isKindOfClass:[NSString class]]) {
@@ -861,14 +1113,83 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
             [self.tableView reloadData];
         }
     };
+    vc.onRefresh = ^(UIRefreshControl *refreshControl) {
+        [weakSelf synchPostFormatsAndDo:^{
+            NSArray *titles = weakPost.blog.sortedPostFormatNames;
+            if (titles.count) {
+                [weakVc reloadWithDictionary:postFormatsDictionary(titles)];
+            }
+            [refreshControl endRefreshing];
+        }];
+    };
+    vc.invokesRefreshOnViewWillAppear = YES;
+    [self.navigationController pushViewController:vc animated:YES];
+}
 
+- (void)showCantShowPostFormatsAlert
+{
+    NSString *title = NSLocalizedString(@"Connection not available",
+                                        @"Title of a prompt saying the app needs an internet connection before it can load post formats");
+    
+    NSString *message = NSLocalizedString(@"Please check your internet connection and try again.",
+                                          @"Politely asks the user to check their internet connection before trying again. ");
+    
+    NSString *cancelButtonTitle = NSLocalizedString(@"OK", @"Title of a button that dismisses a prompt");
+    
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:title
+                                                                             message:message
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
+    
+    [alertController addCancelActionWithTitle:cancelButtonTitle handler:nil];
+    
+    [alertController presentFromRootViewController];
+}
+
+- (void)toggleShareConnectionForIndexPath:(NSIndexPath *) indexPath
+{
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+    if (indexPath.row < self.publicizeConnections.count) {
+        PublicizeConnection *connection = self.publicizeConnections[indexPath.row];
+        if (connection.isBroken) {
+            SharingDetailViewController *controller = [[SharingDetailViewController alloc] initWithBlog:self.post.blog
+                                                                                    publicizeConnection:connection];
+            [self.navigationController pushViewController:controller animated:YES];
+        } else {
+            UISwitch *cellSwitch = (UISwitch *)cell.accessoryView;
+            [cellSwitch setOn:!cellSwitch.on animated:YES];
+            if (cellSwitch.on) {
+                [self.post enablePublicizeConnectionWithKeyringID:connection.keyringConnectionID];
+            } else {
+                [self.post disablePublicizeConnectionWithKeyringID:connection.keyringConnectionID];
+            }
+        }
+    }
+}
+
+- (void)showEditShareMessageController
+{
+    SettingsMultiTextViewController *vc = [[SettingsMultiTextViewController alloc] initWithText:self.post.publicizeMessage
+                                                                                    placeholder:nil
+                                                                                           hint:NSLocalizedString(@"Customize the message you want to share.", @"Hint displayed when the user is customizing the share message.")
+                                                                                     isPassword:NO];
+    vc.title = NSLocalizedString(@"Customize the message", @"Title for the edition of the share message.");
+    vc.onValueChanged = ^(NSString *value) {
+        if (value.length) {
+            self.post.publicizeMessage = value;
+        } else {
+            self.post.publicizeMessage = nil;
+        }
+        [self.tableView reloadData];
+    };
     [self.navigationController pushViewController:vc animated:YES];
 }
 
 - (void)showPostGeolocationSelector
 {
-    PostGeolocationViewController *controller = [[PostGeolocationViewController alloc] initWithPost:self.post];
-    [self.navigationController pushViewController:controller animated:YES];
+    PostGeolocationViewController *controller = [[PostGeolocationViewController alloc] initWithPost:self.post locationService:self.locationService];
+    UINavigationController *navigationController = [[UINavigationController alloc] initWithRootViewController:controller];
+    navigationController.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:navigationController animated:YES completion:nil];
 }
 
 - (void)showFeaturedImageSelector
@@ -877,7 +1198,8 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         // Check if the featured image is set, otherwise we don't want to do anything while it's still loading.
         if (self.featuredImage) {
             FeaturedImageViewController *featuredImageVC = [[FeaturedImageViewController alloc] initWithPost:self.apost];
-            [self.navigationController pushViewController:featuredImageVC animated:YES];
+            UINavigationController *navigationController = [[UINavigationController alloc] initWithRootViewController:featuredImageVC];
+            [self presentViewController:navigationController animated:YES completion:nil];
         }
     } else {
         if (!self.isUploadingMedia) {
@@ -886,15 +1208,30 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     }
 }
 
+- (void)showEditExcerptController
+{
+    SettingsMultiTextViewController *vc = [[SettingsMultiTextViewController alloc] initWithText:self.apost.mt_excerpt
+                                                                                    placeholder:nil
+                                                                                           hint:NSLocalizedString(@"Excerpts are optional hand-crafted summaries of your content.", @"Should be the same as the text displayed if the user clicks the (i) in Calypso.")
+                                                                                     isPassword:NO];
+    vc.title = NSLocalizedString(@"Excerpt", @"Label for the excerpt field. Should be the same as WP core.");
+    vc.onValueChanged = ^(NSString *value) {
+        self.apost.mt_excerpt = value;
+        [self.tableView reloadData];
+    };
+    [self.navigationController pushViewController:vc animated:YES];
+}
+
 - (void)showMediaPicker
 {
-    WPMediaPickerViewController *picker = [[WPMediaPickerViewController alloc] init];
+    WPNavigationMediaPickerViewController *picker = [[WPNavigationMediaPickerViewController alloc] init];
     self.mediaDataSource = [[WPAndDeviceMediaLibraryDataSource alloc] initWithPost:self.apost];
     picker.dataSource = self.mediaDataSource;
     picker.filter = WPMediaTypeImage;
     picker.delegate = self;
     picker.allowMultipleSelection = NO;
     picker.showMostRecentFirst = YES;
+    picker.modalPresentationStyle = UIModalPresentationFormSheet;
     [self presentViewController:picker animated:YES completion:nil];
 }
 
@@ -921,7 +1258,8 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         }
         width = width - (PostFeaturedImageCellMargin * 2); // left and right cell margins
         CGFloat height = ceilf(width * 0.66);
-        CGSize imageSize = CGSizeMake(width, height);
+        CGFloat scale = [[UIScreen mainScreen] scale];
+        CGSize imageSize = CGSizeMake(width * scale, height * scale);
         
         [self.imageSource fetchImageForURL:url
                                   withSize:imageSize
@@ -970,7 +1308,10 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
     self.featuredImageProgress = convertingProgress;
     __weak __typeof(self) weakSelf = self;
     MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
-    [mediaService createMediaWithPHAsset:asset forPostObjectID:self.apost.objectID completion:^(Media *media, NSError * error) {
+    [mediaService createMediaWithPHAsset:asset
+                         forPostObjectID:self.apost.objectID
+                       thumbnailCallback:nil
+                              completion:^(Media *media, NSError * error) {
         if (!weakSelf) {
             return;
         }
@@ -1003,7 +1344,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
                           __typeof__(self) strongSelf = weakSelf;
                           strongSelf.isUploadingMedia = NO;
                           [strongSelf.tableView reloadData];
-                          if (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled) {
+                          if ([error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled) {
                               return;
                           }
                           [WPError showAlertWithTitle:NSLocalizedString(@"Couldn't upload featured image", @"The title for an alert that says to the user that the featured image he selected couldn't be uploaded.") message:error.localizedDescription];
@@ -1070,7 +1411,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 {
     if (value == nil) {
         // Publish Immediately
-        [self datePickerChanged:nil];
+        [self.apost publishImmediately];
     } else {
         // Compare via timeIntervalSinceDate to let us ignore subsecond variation.
         NSDate *startingDate = (NSDate *)self.datePicker.startingValue;
@@ -1079,7 +1420,7 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
         if (fabs(interval) < 1.0) {
             return;
         }
-        [self datePickerChanged:selectedDate];
+        self.apost.dateCreated = selectedDate;
     }
 }
 
@@ -1116,14 +1457,6 @@ UIPopoverControllerDelegate, WPMediaPickerViewControllerDelegate, PostCategories
 
 - (void)mediaPickerControllerDidCancel:(WPMediaPickerViewController *)picker {
     [self.navigationController dismissViewControllerAnimated:YES completion:nil];
-}
-
-#pragma mark - Status bar management
-
-- (BOOL)prefersStatusBarHidden
-{
-    // Do not hide the status bar on iPad
-    return self.shouldHideStatusBar && !IS_IPAD;
 }
 
 #pragma mark - PostCategoriesViewControllerDelegate

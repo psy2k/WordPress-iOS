@@ -3,6 +3,119 @@
 This file documents changes in the data model. Please explain any changes to the
 data model as well as any custom migrations.
 
+## WordPress 57
+- @kurzee 2017-03-16
+- `Media` removed `orientation` property.
+- `Media` removed `progress` property.
+
+## WordPress 56
+- @jleandroperez 2017-02-22
+- `BasePost` removed `mt_text_more` property
+- @koke 2017-02-10
+- `Account` added `emailVerified` property.
+- @elibud 2017-02-02
+- `Post` added optional `disabledPublicizeConnections` transformable property.
+- `Post` added optional `publicizeMessage` and `publicizeMessageID` string properties.
+
+## WordPress 55
+- @aerych 2016-12-21
+- `ReaderPost` renamed `preserveForRestoration` to "inUse"
+- `ReaderAbstractTopic` renamed `preserveForRestoration` to "inUse"
+
+## WordPress 54
+- @aerych 2016-12-08
+- `ReaderPost` added `preserveForRestoration` boolean. Indexed. Default `NO`. Not optional.
+
+## WordPress 53
+- @jleandroperez 2016-10-27
+- `Notification` added `notificationHash` property.
+- @jleandroperez 2016-10-19
+- `Notification` removed `simperiumKey` property.
+- `Notification` removed `ghostData` property.
+- `Notification` added `notificationId` property.
+- Removed `Meta` entity.
+
+## WordPress 52
+
+- @koke 2016-09-28
+- Added `ReaderTeamTopic` entity.
+
+## WordPress 51
+- @aerych 2016-08-12
+- Added `algorithm` optional string field to `ReaderAbstractTopic`.
+- Added `railcar` optional NSData field to `ReaderPost`.
+- @aerych 2016-08-05
+- Removed `ReaderSite` entity.
+- @aerych 2016-07-19
+- `ReaderAbstractTopic` added `preserveForRestoration` boolean. Indexed. Default `NO`. Not optional.
+
+## WordPress 50
+
+- @aerych 2016-06-24
+- `ReaderSiteTopic` added `feedURL` string property
+- @jleandroperez 2016-06-20
+- `Person` added `creationDate` attribute.
+- @jleandroperez 2016-06-21
+- `Person` removed `isFollower` property.
+- `Person` added `kind` Int16 attribute.
+- @aerych 2016-06-09
+- Moved `dateModified` property from `BasePost` to `AbstractPost`
+- @aerych 2016-05-26
+- Added `ReaderSearchSuggestion` entity. Represents a search in the reader.
+- @aerych 2016-05-31
+- Added `dateModified` property to `BasePost` model.
+- @aerych 2016-05-23
+- `ReaderPost` added `score`.
+- `ReaderPost` added `sortRank`. It is not optional so the default of 0 is enforced.
+
+## WordPress 49
+
+- @frosty 2016-05-17
+- Added `Domain` entity. Represents a domain belonging to a site.
+- `Blog` added new relationship `domains`. An unordered set of `Domain`s for the blog.
+- @jleandroperez 2016-05-13
+- `Person` updated `siteID` to Int64.
+- `Person` updated `userID` to Int64.
+- `Person` added Boolean `isFollower`.
+- @frosty 2016-05-12
+- `Blog` added String `planTitle`.
+- @aerych 2016-05-12
+- Added `ReaderSearchTopic` entity. Represents a search in the reader.
+- @jleandroperez 2016-05-04
+ - `Person` added Int64 `linkedUserID`.
+- @jleandroperez 2016-04-22
+ - `Blog` added transformable `capabilities`.
+
+## WordPress 48 
+
+- @sergioestevao 2016-04-05
+ - `Media` added new integer attribute `postID` to store the post to where the media is attached to.
+- @kurzee 2016-04-08
+ - `Menu` changing `menuId` attribute to `menuID` as a int_32 number instead of string.
+ - `MenuItem` changing `itemId` attribute to `itemID` as an int_32 number instead of string.
+ - `MenuItem` changing `contentId` attribute to `contentID` as an int_64 number instead of string.
+- @jleandroperez 2016-04-11
+ - `AccountSettings` added new string `emailPendingAddress`. Whenever it's not nil, contains the new User's Email Address.
+ - `AccountSettings` added new bool `emailPendingChange`. Indicates whether there's a pending Email change, or not.
+
+## WordPress 47 (@kurzee 2016-03-07)
+
+- `Post` added new string attribute `postType` to store the associated string type of a `Post` entity.
+- Added `PostType` entity. Represents a post type and its info.
+- `Blog` added new relationship `postTypes` to store `PostType` entities for a site.
+
+## WordPress 46 (@aerych 2016-01-29)
+
+- `BlogSettings` added string `sharingButtonStyle`. Stores style to use for sharing buttons.
+- `BlogSettings` added string `sharingLabel`. Stores the text to show in the sharing label. 
+- `BlogSettings` added string `sharingTwitterName`. Stores the username used when sharing to Twitter.
+- `BlogSettings` added bool `sharingCommentLikesEnabled`. Whether comments display a like button.
+- `BlogSettings` added bool `sharingDisabledLikes`.  Whether posts display a like button. 
+- `BlogSettings` added bool `sharingDisabledReblogs`. Whether posts display a reblog button. 
+- `BlogSettings` added integer `languageID`. Stores the Blog's Language ID.
+- Added `SharingButton` entity. Represents a buton for sharing content to a third-party service.
+- `Blog` added new relationship `sharingButtons`. An unordered set of `ShareButton`s for the blog.
+
 ## WordPress 45 (@kurzee 2016-01-15)
 
 - Added `Menu` entity. Encapsulates the data and relationships for customizing a site menu.
@@ -12,6 +125,7 @@ data model as well as any custom migrations.
 - `Blog` added new relationship called `menus`. Persisting associated Menus for a site.
 - `Blog` added new relationship called `menuLocations`. Persists associated MenuLocations available for a site.
 - `Blog` added new relationship called `tags`. Persisting associated PostTags for a site.
+- `Blog` added new integer64 attribute `planID` to store a blog's current plan's product ID.
 
 ## WordPress 44 (@aerych 2016-01-11)
 

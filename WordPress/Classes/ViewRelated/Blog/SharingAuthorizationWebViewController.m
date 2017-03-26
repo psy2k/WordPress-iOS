@@ -17,6 +17,7 @@ typedef NS_ENUM(NSInteger, AuthorizeAction) {
     AuthorizeActionDeny,
 };
 
+static NSString * const SharingAuthorizationLoginURL = @"https://wordpress.com/wp-login.php";
 static NSString * const SharingAuthorizationPrefix = @"https://public-api.wordpress.com/connect/";
 static NSString * const SharingAuthorizationRequest = @"action=request";
 static NSString * const SharingAuthorizationVerify = @"action=verify";
@@ -45,12 +46,14 @@ static NSString * const SharingAuthorizationAccessDenied = @"error=access_denied
  */
 @property (nonatomic, strong) PublicizeService *publicizer;
 
+@property (nonatomic, strong) NSMutableArray *hosts;
+
 @end
 
 @implementation SharingAuthorizationWebViewController
 
 + (instancetype)controllerWithPublicizer:(PublicizeService *)publicizer
-                              andRefresh:(NSString *)refresh
+                           connectionURL:(NSURL *)connectionURL
                                  forBlog:(Blog *)blog
 {
     NSParameterAssert(publicizer);
@@ -59,23 +62,61 @@ static NSString * const SharingAuthorizationAccessDenied = @"error=access_denied
     SharingAuthorizationWebViewController *webViewController = [[self alloc] initWithNibName:@"WPWebViewController" bundle:nil];
 
     webViewController.authToken = blog.authToken;
-    webViewController.username = blog.usernameForSite;
-    webViewController.wpLoginURL = [NSURL URLWithString:blog.loginUrl];
+    webViewController.username = blog.jetpackAccount.username ?: blog.account.username;
+    webViewController.wpLoginURL = [NSURL URLWithString:SharingAuthorizationLoginURL];
     webViewController.publicizer = publicizer;
     webViewController.secureInteraction = YES;
-
-    NSURL *authorizeURL = [NSURL URLWithString:refresh.length ? refresh : publicizer.connectURL];
-    webViewController.url = authorizeURL;
+    webViewController.url = connectionURL;
     
     return webViewController;
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+
+    [self cleanup];
 }
 
 
 #pragma mark - Instance Methods
 
+- (NSMutableArray *)hosts
+{
+    if (!_hosts) {
+        _hosts = [NSMutableArray array];
+    }
+    return _hosts;
+}
+
+
+- (void)saveHostForRequest:(NSURLRequest *)request
+{
+    NSString *host = request.URL.host;
+    if (!host || [host containsString:@"wordpress"] || [self.hosts containsObject:host]) {
+        return;
+    }
+    NSArray *components = [host componentsSeparatedByString:@"."];
+    // A bit of paranioa here. The components should never be less than two but just in case...
+    NSString *hostName = ([components count] > 1) ? [components objectAtIndex:[components count] - 2] : [components firstObject];
+    [self.hosts addObject:hostName];
+}
+
+- (void)cleanup
+{
+    // Log out of the authenticed service.
+    NSHTTPCookieStorage *storage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    for (NSHTTPCookie *cookie in [storage cookies]) {
+        for (NSString *host in self.hosts) {
+            if ([cookie.domain containsString:host]) {
+                [storage deleteCookie:cookie];
+            }
+        }
+    }
+}
+
 - (IBAction)dismiss
 {
-    [super dismiss];
     if ([self.delegate respondsToSelector:@selector(authorizeDidCancel:)]) {
         [self.delegate authorizeDidCancel:self.publicizer];
     }
@@ -86,8 +127,6 @@ static NSString * const SharingAuthorizationAccessDenied = @"error=access_denied
     // Note: There are situations where this can be called in error due to how
     // individual services choose to reply to an authorization request.
     // Delegates should expect to handle a false positive.
-    [super dismiss];
-
     if ([self.delegate respondsToSelector:@selector(authorizeDidSucceed:)]) {
         [self.delegate authorizeDidSucceed:self.publicizer];
     }
@@ -95,7 +134,6 @@ static NSString * const SharingAuthorizationAccessDenied = @"error=access_denied
 
 - (void)displayLoadError:(NSError *)error
 {
-    [super dismiss];
     if ([self.delegate respondsToSelector:@selector(authorize:didFailWithError:)]) {
         [self.delegate authorize:self.publicizer didFailWithError:error];
     }
@@ -159,6 +197,11 @@ static NSString * const SharingAuthorizationAccessDenied = @"error=access_denied
     shouldStartLoadWithRequest:(NSURLRequest *)request
                 navigationType:(UIWebViewNavigationType)navigationType
 {
+    // Prevent a second verify load by someone happy clicking.
+    if (self.loadingVerify) {
+        return NO;
+    }
+
     AuthorizeAction action = [self requestedAuthorizeAction:request];
     switch (action) {
         case AuthorizeActionNone:
@@ -189,6 +232,8 @@ static NSString * const SharingAuthorizationAccessDenied = @"error=access_denied
 
 - (void)webViewDidFinishLoad:(UIWebView *)webView
 {
+    [self saveHostForRequest:webView.request];
+
     if (self.loadingVerify) {
         [self handleAuthorizationAllowed];
     } else {

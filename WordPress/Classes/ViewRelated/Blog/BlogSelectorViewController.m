@@ -1,6 +1,5 @@
 #import "BlogSelectorViewController.h"
 #import "UIImageView+Gravatar.h"
-#import "WordPressComApi.h"
 #import "BlogDetailsViewController.h"
 #import "WPBlogTableViewCell.h"
 #import "ContextManager.h"
@@ -9,67 +8,120 @@
 #import "AccountService.h"
 #import "WordPress-Swift.h"
 
-static NSString *const BlogCellIdentifier = @"BlogCell";
+@interface BlogSelectorViewController () <UISearchControllerDelegate, UISearchResultsUpdating>
 
-@interface BlogSelectorViewController ()
+@property (nonatomic, strong) NSNumber                      *selectedObjectDotcomID;
+@property (nonatomic, strong) NSManagedObjectID             *selectedObjectID;
+@property (nonatomic,   copy) BlogSelectorSuccessHandler    successHandler;
+@property (nonatomic,   copy) BlogSelectorDismissHandler    dismissHandler;
+@property (nonatomic, strong) UISearchController            *searchController;
+@property (nonatomic, strong) BlogListDataSource            *dataSource;
 
-@property (nonatomic, strong) NSFetchedResultsController *resultsController;
-@property (nonatomic) BOOL sectionDeletedByController;
-
-@property (nonatomic, strong) NSManagedObjectID *selectedObjectID;
-@property (nonatomic, copy) void (^selectedCompletionHandler)(NSManagedObjectID *selectedObjectID);
-@property (nonatomic, copy) void (^cancelCompletionHandler)(void);
-
+@property (nonatomic) BOOL visible;
 @end
 
 @implementation BlogSelectorViewController
-
-- (id)initWithSelectedBlogObjectID:(NSManagedObjectID *)objectID
-                selectedCompletion:(void (^)(NSManagedObjectID *))selected
-                  cancelCompletion:(void (^)())cancel
-{
-    self = [super initWithStyle:UITableViewStyleGrouped];
-
-    if (self) {
-        _selectedObjectID = objectID;
-        _selectedCompletionHandler = selected;
-        _cancelCompletionHandler = cancel;
-    }
-
-    return self;
-}
 
 - (void)dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
+- (instancetype)initWithSelectedBlogObjectID:(NSManagedObjectID *)objectID
+                              successHandler:(BlogSelectorSuccessHandler)successHandler
+                              dismissHandler:(BlogSelectorDismissHandler)dismissHandler
+{
+    self = [super initWithStyle:UITableViewStylePlain];
+
+    if (self) {
+        _selectedObjectID = objectID;
+        _successHandler = successHandler;
+        _dismissHandler = dismissHandler;
+        _displaysCancelButton = YES;
+        _displaysNavigationBarWhenSearching = YES;
+        [self configureDataSource];
+    }
+
+    return self;
+}
+
+- (instancetype)initWithSelectedBlogDotComID:(NSNumber *)dotComID
+                              successHandler:(BlogSelectorSuccessDotComHandler)successHandler
+                              dismissHandler:(BlogSelectorDismissHandler)dismissHandler
+{
+    // Keep the Selected Dotcom ID
+    _selectedObjectDotcomID = dotComID;
+    
+    // Wrap up the main callback into something useful to us
+    BlogSelectorSuccessHandler wrappedSuccessHandler = ^(NSManagedObjectID *selectedObjectID) {
+        NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+        Blog *blog = [context existingObjectWithID:selectedObjectID error:nil];
+        successHandler(blog.dotComID);
+    };
+    
+    return [self initWithSelectedBlogObjectID:nil
+                               successHandler:wrappedSuccessHandler
+                               dismissHandler:dismissHandler];
+}
+
+- (void)configureDataSource
+{
+    self.dataSource = [BlogListDataSource new];
+    self.dataSource.selecting = YES;
+    self.dataSource.selectedBlogId = self.selectedObjectID;
+    __weak __typeof(self) weakSelf = self;
+    self.dataSource.dataChanged = ^{
+        if (weakSelf.visible) {
+            [weakSelf dataChanged];
+        }
+    };
+}
+
+- (BOOL)displaysOnlyDefaultAccountSites {
+    return (self.dataSource.account != nil);
+}
+
+- (void)setDisplaysOnlyDefaultAccountSites:(BOOL)onlyDefault
+{
+    if (onlyDefault) {
+        NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+        WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+        self.dataSource.account = defaultAccount;
+    } else {
+        self.dataSource.account = nil;
+    }
+}
+
 - (void)viewDidLoad
 {
     [super viewDidLoad];
 
+    // Listen to Account Changes
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(wordPressComAccountChanged:)
                                                  name:WPAccountDefaultWordPressComAccountChangedNotification
                                                object:nil];
 
-    if (IS_IPHONE) {
-        // Remove one-pixel gap resulting from a top-aligned grouped table view
-        UIEdgeInsets tableInset = [self.tableView contentInset];
-        tableInset.top = -1;
-        self.tableView.contentInset = tableInset;
-
-        // Cancel button
+    // Cancel button
+    if (self.displaysCancelButton) {
         UIBarButtonItem *cancelButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
                                                                                           target:self
                                                                                           action:@selector(cancelButtonTapped:)];
 
         self.navigationItem.leftBarButtonItem = cancelButtonItem;
     }
-
+    
+    // TableView
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
+    
+    [self.tableView registerClass:[WPBlogTableViewCell class] forCellReuseIdentifier:[WPBlogTableViewCell reuseIdentifier]];
+    self.tableView.dataSource = self.dataSource;
+    [self.tableView reloadData];
 
-    [self.tableView registerClass:[WPBlogTableViewCell class] forCellReuseIdentifier:BlogCellIdentifier];
+    self.tableView.tableFooterView = [UIView new];
+
+    [self configureSearchController];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -77,31 +129,163 @@ static NSString *const BlogCellIdentifier = @"BlogCell";
     [super viewWillAppear:animated];
 
     [self.navigationController setNavigationBarHidden:NO animated:animated];
-    self.resultsController.delegate = self;
-    [self.resultsController performFetch:nil];
-    [self.tableView reloadData];
 
-    // Scroll the currently selected object into view.
-    NSManagedObject *obj = [self.resultsController.managedObjectContext objectWithID:self.selectedObjectID];
-    NSIndexPath *indexPath = [self.resultsController indexPathForObject:obj];
-    [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionNone animated:NO];
+    [self registerForKeyboardNotifications];
+    [self.tableView reloadData];
+    [self syncBlogs];
+    [self scrollToSelectedObjectID];
+    self.visible = YES;
 }
 
 - (void)viewWillDisappear:(BOOL)animated
 {
     [super viewWillDisappear:animated];
-    self.resultsController.delegate = nil;
+
+    [self unregisterForKeyboardNotifications];
+
+    self.visible = NO;
 }
 
-- (NSUInteger)numSites
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
-    return [[self.resultsController fetchedObjects] count];
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+
+    // Note:
+    // We're toggling the SearchController as inactive, since, on iPad devices, upon rotation, an
+    // active UISearchBar might break violently when Adaptivity kicks in.
+    //
+    self.searchController.active = NO;
 }
 
-- (BOOL)hasDotComAndSelfHosted
+- (void)configureSearchController
 {
-    return ([[self.resultsController sections] count] > 1);
+    self.extendedLayoutIncludesOpaqueBars = YES;
+    self.definesPresentationContext = YES;
+
+    self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
+    self.searchController.dimsBackgroundDuringPresentation = NO;
+    self.searchController.hidesNavigationBarDuringPresentation = !_displaysNavigationBarWhenSearching;
+    self.searchController.delegate = self;
+    self.searchController.searchResultsUpdater = self;
+
+    [WPStyleGuide configureSearchBar:self.searchController.searchBar];
+
+    [self addSearchBarTableHeaderView];
 }
+
+- (void)addSearchBarTableHeaderView
+{
+    if (!self.tableView.tableHeaderView) {
+        // Required to work around a bug where the search bar was extending a
+        // grey background above the top of the tableview, which was visible when
+        // pulling down further than offset zero
+        SearchWrapperView *wrapperView = [SearchWrapperView new];
+        [wrapperView addSubview:self.searchController.searchBar];
+        wrapperView.frame = CGRectMake(0, 0, self.view.bounds.size.width, self.searchController.searchBar.bounds.size.height);
+        self.tableView.tableHeaderView = wrapperView;
+    }
+}
+
+#pragma mark - Notifications
+
+- (void)registerForKeyboardNotifications
+{
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardDidShow:)
+                                                 name:UIKeyboardDidShowNotification
+                                               object:nil];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardDidHide:)
+                                                 name:UIKeyboardDidHideNotification
+                                               object:nil];
+}
+
+- (void)unregisterForKeyboardNotifications
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardDidShowNotification object:nil];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardDidHideNotification object:nil];
+}
+
+- (CGFloat)searchBarHeight {
+    return CGRectGetHeight(self.searchController.searchBar.bounds) + self.topLayoutGuide.length;
+}
+
+- (void)keyboardDidShow:(NSNotification *)notification
+{
+    CGRect keyboardFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGFloat keyboardHeight = MAX(CGRectGetMaxY(self.tableView.frame) - keyboardFrame.origin.y, 0);
+
+    UIEdgeInsets insets = self.tableView.contentInset;
+
+    self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake([self searchBarHeight], insets.left, keyboardHeight, insets.right);
+    self.tableView.contentInset = UIEdgeInsetsMake(self.topLayoutGuide.length, insets.left, keyboardHeight, insets.right);
+}
+
+- (void)keyboardDidHide:(NSNotification*)notification
+{
+    CGFloat tabBarHeight = self.tabBarController.tabBar.bounds.size.height;
+    UIEdgeInsets insets = self.tableView.contentInset;
+    insets.top = self.topLayoutGuide.length;
+    insets.bottom = tabBarHeight;
+
+    self.tableView.contentInset = insets;
+
+    if (self.searchController.active) {
+        insets.top = [self searchBarHeight];
+    }
+
+    self.tableView.scrollIndicatorInsets = insets;
+}
+
+#pragma mark - Helpers
+
+- (void)syncBlogs
+{
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
+    
+    [context performBlock:^{
+        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+        BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+        WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+        
+        if (!defaultAccount) {
+            return;
+        }
+        
+        [blogService syncBlogsForAccount:defaultAccount success:nil failure:nil];
+    }];
+}
+
+- (void)scrollToSelectedObjectID
+{
+    if (self.selectedObjectID == nil) {
+        return;
+    }
+
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    Blog *blog = (Blog *)[context objectWithID:self.selectedObjectID];
+    NSIndexPath *indexPath = [self.dataSource indexPathForBlog:blog];
+    [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+}
+
+- (NSManagedObjectID *)selectedObjectID
+{
+    if (_selectedObjectID != nil || _selectedObjectDotcomID == nil) {
+        return _selectedObjectID;
+    }
+    
+    // Retrieve
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    BlogService *service = [[BlogService alloc] initWithManagedObjectContext:context];
+    Blog *selectedBlog = [service blogByBlogId:self.selectedObjectDotcomID];
+    
+    // Cache
+    _selectedObjectID = selectedBlog.objectID;
+    
+    return _selectedObjectID;
+}
+
 
 #pragma mark - Notifications
 
@@ -110,146 +294,122 @@ static NSString *const BlogCellIdentifier = @"BlogCell";
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationFade];
 }
 
+
+#pragma mark - Data Listener
+
+- (void)dataChanged
+{
+    [self.tableView reloadData];
+}
+
+
 #pragma mark - Actions
 
 - (IBAction)cancelButtonTapped:(id)sender
 {
-    if (self.cancelCompletionHandler) {
-        self.cancelCompletionHandler();
+    if (self.dismissHandler) {
+        self.dismissHandler();
     }
-}
-
-#pragma mark - Table view data source
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
-{
-    return [self.resultsController sections].count;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
-{
-    id<NSFetchedResultsSectionInfo> sectionInfo;
-    NSInteger numberOfRows = 0;
-    if ([self.resultsController sections].count > section) {
-        sectionInfo = [[self.resultsController sections] objectAtIndex:section];
-        numberOfRows = sectionInfo.numberOfObjects;
-    }
-
-    return numberOfRows;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    UITableViewCell *cell = [self.tableView dequeueReusableCellWithIdentifier:BlogCellIdentifier];
-
-    [WPStyleGuide configureTableViewSmallSubtitleCell:cell];
-    [self configureCell:cell atIndexPath:indexPath];
-
-    return cell;
-}
-
-- (void)configureCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath
-{
-    cell.textLabel.textAlignment = NSTextAlignmentLeft;
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.accessoryView = nil;
-
-    Blog *blog = [self.resultsController objectAtIndexPath:indexPath];
-    NSString *name = blog.settings.name;
     
-    if (name.length != 0) {
-        cell.textLabel.text = name;
-        cell.detailTextLabel.text = blog.url;
-    } else {
-        cell.textLabel.text = blog.url;
+    if (self.dismissOnCancellation) {
+        [self dismissViewControllerAnimated:YES completion:nil];
     }
-
-    [cell.imageView setImageWithSiteIcon:blog.icon];
-
-    cell.accessoryType = blog.objectID == self.selectedObjectID ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    cell.selectionStyle = UITableViewCellSelectionStyleBlue;
 }
+
+#pragma mark - UITableView Delegate
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    NSIndexPath *previousIndexPath;
-    if (self.selectedObjectID) {
-        for (Blog *blog in self.resultsController.fetchedObjects) {
-            if (blog.objectID == self.selectedObjectID) {
-                previousIndexPath = [self.resultsController indexPathForObject:blog];
-                break;
-            }
-        }
-
-        if ([previousIndexPath compare:indexPath] == NSOrderedSame) {
-            // User tapped the already selected item. Treat this as a cancel event
-            // so the picker can be dismissed without changes.
-            [self cancelButtonTapped:nil];
-            return;
-        }
+    Blog *selectedBlog = [self.dataSource blogAtIndexPath:indexPath];
+    if (selectedBlog.objectID == self.selectedObjectID) {
+        // User tapped the already selected item. Treat this as a cancel event
+        // so the picker can be dismissed without changes.
+        [self cancelButtonTapped:nil];
+        return;
     }
-
-    Blog *selectedBlog = [self.resultsController objectAtIndexPath:indexPath];
     self.selectedObjectID = selectedBlog.objectID;
-    [tableView cellForRowAtIndexPath:indexPath].accessoryType = UITableViewCellAccessoryCheckmark;
-
-    if (previousIndexPath) {
-        [tableView reloadRowsAtIndexPaths:@[previousIndexPath] withRowAnimation:UITableViewRowAnimationNone];
-    }
+    self.dataSource.selectedBlogId = selectedBlog.objectID;
 
     // Fire off the selection after a short delay to let animations complete for selection/deselection
-    if (self.selectedCompletionHandler) {
+    if (self.successHandler) {
         double delayInSeconds = 0.2;
         dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
         dispatch_after(popTime, dispatch_get_main_queue(), ^(void){
-            self.selectedCompletionHandler(self.selectedObjectID);
+            self.successHandler(self.selectedObjectID);
+            
+            if (self.dismissOnCompletion) {
+                [self dismissViewControllerAnimated:YES completion:nil];
+            }
         });
     }
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return 54;
+    return [WPBlogTableViewCell cellHeight];
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
-    return CGFLOAT_MIN;
+    // If we have more than one section, show a 2px separator unless the section has a title.
+    NSString *sectionTitle = nil;
+    if ([tableView.dataSource respondsToSelector:@selector(tableView:titleForHeaderInSection:)]) {
+        sectionTitle = [tableView.dataSource tableView:tableView titleForHeaderInSection:section];
+    }
+    if (section > 0 && [sectionTitle length] == 0) {
+        return 2;
+    }
+    return UITableViewAutomaticDimension;
 }
 
-#pragma mark - NSFetchedResultsController
+#pragma mark - UISearchController
 
-- (NSFetchedResultsController *)resultsController
+- (void)willPresentSearchController:(UISearchController *)searchController
 {
-    if (_resultsController) {
-        return _resultsController;
-    }
-
-    NSManagedObjectContext *moc = [[ContextManager sharedInstance] mainContext];
-    NSFetchRequest *fetchRequest = [NSFetchRequest fetchRequestWithEntityName:@"Blog"];
-    [fetchRequest setSortDescriptors:@[[NSSortDescriptor sortDescriptorWithKey:@"settings.name" ascending:YES selector:@selector(localizedCaseInsensitiveCompare:)]]];
-    [fetchRequest setPredicate:[self fetchRequestPredicate]];
-
-    _resultsController = [[NSFetchedResultsController alloc]
-                          initWithFetchRequest:fetchRequest
-                          managedObjectContext:moc
-                          sectionNameKeyPath:nil
-                          cacheName:nil];
-    _resultsController.delegate = self;
-
-    NSError *error = nil;
-    if (![_resultsController performFetch:&error]) {
-        DDLogError(@"Couldn't fetch sites: %@", [error localizedDescription]);
-        _resultsController = nil;
-    }
-    return _resultsController;
+    self.dataSource.searching = YES;
 }
 
-- (NSPredicate *)fetchRequestPredicate
+- (void)willDismissSearchController:(UISearchController *)searchController
 {
-    return [NSPredicate predicateWithFormat:@"visible = YES"];
+    self.dataSource.searching = NO;
+}
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController
+{
+    self.dataSource.searchQuery = searchController.searchBar.text;
+}
+
+// Improves the appearance of the arrow when displayed in a popover, by matching
+// its color to the topmost view in the scrollview
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView
+{
+    if (!self.popoverPresentationController) { return; }
+
+    if (self.searchController.active) {
+        self.popoverPresentationController.backgroundColor = self.searchController.searchBar.barTintColor;
+        return;
+    }
+
+    UIColor *arrowColor;
+
+    if (scrollView.contentOffset.y < self.tableView.tableHeaderView.frame.origin.y) {
+        // Above the header view (search bar)
+        arrowColor = self.tableView.backgroundColor;
+    } else if (scrollView.contentOffset.y < self.searchController.searchBar.bounds.size.height) {
+        // Within the search bar
+        arrowColor = self.searchController.searchBar.barTintColor;
+    } else {
+        // Within the table content itself (cells have white backgrounds)
+        arrowColor = [UIColor whiteColor];
+    }
+
+    if (arrowColor != self.popoverPresentationController.backgroundColor) {
+        [UIView animateWithDuration:0.2 animations:^{
+            self.popoverPresentationController.backgroundColor = arrowColor;
+        }];
+    }
 }
 
 @end

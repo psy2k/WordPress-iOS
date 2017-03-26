@@ -1,18 +1,65 @@
 #import "AbstractPost.h"
 #import "Media.h"
 #import "ContextManager.h"
-#import "NSDate+StringFormatting.h"
 #import "WordPress-Swift.h"
+#import "BasePost.h"
+
+NSString * const PostStatusDraft = @"draft";
+NSString * const PostStatusPending = @"pending";
+NSString * const PostStatusPrivate = @"private";
+NSString * const PostStatusPublish = @"publish";
+NSString * const PostStatusScheduled = @"future";
+NSString * const PostStatusTrash = @"trash";
+NSString * const PostStatusDeleted = @"deleted"; // Returned by wpcom REST API when a post is permanently deleted.
 
 @implementation AbstractPost
 
 @dynamic blog;
+@dynamic dateModified;
 @dynamic media;
 @dynamic metaIsLocal;
 @dynamic metaPublishImmediately;
 @dynamic comments;
 
 @synthesize restorableStatus;
+
++ (NSString *)titleForRemoteStatus:(NSNumber *)remoteStatus
+{
+    switch ([remoteStatus intValue]) {
+        case AbstractPostRemoteStatusPushing:
+            return NSLocalizedString(@"Uploading", @"");
+        case AbstractPostRemoteStatusFailed:
+            return NSLocalizedString(@"Failed", @"");
+        case AbstractPostRemoteStatusSync:
+            return NSLocalizedString(@"Posts", @"");
+        default:
+            return NSLocalizedString(@"Local", @"");
+    }
+}
+
++ (NSString *)titleForStatus:(NSString *)status
+{
+    if ([status isEqualToString:PostStatusDraft]) {
+        return NSLocalizedString(@"Draft", @"Name for the status of a draft post.");
+
+    } else if ([status isEqualToString:PostStatusPending]) {
+        return NSLocalizedString(@"Pending review", @"Name for the status of a post pending review.");
+
+    } else if ([status isEqualToString:PostStatusPrivate]) {
+        return NSLocalizedString(@"Privately published", @"Name for the status of a post that is marked private.");
+
+    } else if ([status isEqualToString:PostStatusPublish]) {
+        return NSLocalizedString(@"Published", @"Name for the status of a published post.");
+
+    } else if ([status isEqualToString:PostStatusTrash]) {
+        return NSLocalizedString(@"Trashed", @"Name for the status of a trashed post");
+
+    } else if ([status isEqualToString:PostStatusScheduled]) {
+        return NSLocalizedString(@"Scheduled", @"Name for the status of a scheduled post");
+    }
+    
+    return status;
+}
 
 + (NSSet *)keyPathsForValuesAffectingValueForKey:(NSString *)key
 {
@@ -27,10 +74,12 @@
     return keyPaths;
 }
 
-- (void)remove
++ (NSString *const)remoteUniqueIdentifier
 {
-    [super remove];
+    return @"";
 }
+
+#pragma mark - Life Cycle Methods
 
 - (void)awakeFromFetch
 {
@@ -42,6 +91,26 @@
         [self setPrimitiveValue:@(AbstractPostRemoteStatusFailed) forKey:@"remoteStatusNumber"];
     }
 }
+
+- (void)remove
+{
+    if (self.remoteStatus == AbstractPostRemoteStatusPushing || self.remoteStatus == AbstractPostRemoteStatusLocal) {
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"PostUploadCancelled" object:self];
+    }
+
+    [self.managedObjectContext performBlock:^{
+        [self.managedObjectContext deleteObject:self];
+    }];
+
+}
+
+- (void)save
+{
+    [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
+}
+
+
+#pragma mark - Getters/Setters
 
 - (void)setRemoteStatusNumber:(NSNumber *)remoteStatusNumber
 {
@@ -56,21 +125,78 @@
 {
     NSString *key = @"date_created_gmt";
     [self willChangeValueForKey:key];
-    self.metaPublishImmediately = (date_created_gmt == nil);
+    self.metaPublishImmediately = [self shouldPublishImmediately];
     [self setPrimitiveValue:date_created_gmt forKey:key];
     [self didChangeValueForKey:key];
 }
 
-+ (NSString *const)remoteUniqueIdentifier
+- (void)setDateCreated:(NSDate *)localDate
 {
-    return @"";
+    self.date_created_gmt = localDate;
+
+    /*
+     If the date is nil it means publish immediately so set the status to publish.
+     If the date is in the future set the status to scheduled if current status is published.
+     If the date is now or in the past, and the status is scheduled, set the status
+     to published.
+     */
+    if ([self dateCreatedIsNilOrEqualToDateModified]) {
+        // A nil date means publish immediately.
+        self.status = PostStatusPublish;
+
+    } else if ([self hasFuturePublishDate]) {
+        // Needs to be a nested conditional so future date + scheduled status
+        // is handled correctly.
+        if ([self.status isEqualToString:PostStatusPublish]) {
+            self.status = PostStatusScheduled;
+        }
+    } else if ([self.status isEqualToString:PostStatusScheduled]) {
+        self.status = PostStatusPublish;
+    }
 }
 
-- (void)markRemoteStatusFailed
+- (NSString *)statusTitle
 {
-    self.remoteStatus = AbstractPostRemoteStatusFailed;
-    [self save];
+    return [AbstractPost titleForStatus:self.status];
 }
+
+- (AbstractPostRemoteStatus)remoteStatus
+{
+    return (AbstractPostRemoteStatus)[[self remoteStatusNumber] intValue];
+}
+
+- (void)setRemoteStatus:(AbstractPostRemoteStatus)aStatus
+{
+    [self setRemoteStatusNumber:[NSNumber numberWithInt:aStatus]];
+}
+
+- (NSString *)remoteStatusText
+{
+    return [AbstractPost titleForRemoteStatus:self.remoteStatusNumber];
+}
+
+- (void)setFeaturedImage:(Media *)featuredImage
+{
+    self.post_thumbnail = featuredImage.mediaID;
+}
+
+- (Media *)featuredImage
+{
+    if (!self.post_thumbnail) {
+        return nil;
+    }
+
+    Media *featuredMedia = [[self.blog.media objectsPassingTest:^BOOL(id obj, BOOL *stop) {
+        Media *media = (Media *)obj;
+        if (media.mediaID) {
+            *stop = [self.post_thumbnail isEqualToNumber:media.mediaID];
+        }
+        return *stop;
+    }] anyObject];
+
+    return featuredMedia;
+}
+
 
 #pragma mark -
 #pragma mark Revision management
@@ -78,21 +204,16 @@
 - (void)cloneFrom:(AbstractPost *)source
 {
     for (NSString *key in [[[source entity] attributesByName] allKeys]) {
-        if ([key isEqualToString:@"permalink"]) {
-            DDLogInfo(@"Skipping %@", key);
-        } else {
-            DDLogInfo(@"Copying attribute %@", key);
+        if (![key isEqualToString:@"permalink"]) {
             [self setValue:[source valueForKey:key] forKey:key];
         }
     }
     for (NSString *key in [[[source entity] relationshipsByName] allKeys]) {
         if ([key isEqualToString:@"original"] || [key isEqualToString:@"revision"]) {
-            DDLogInfo(@"Skipping relationship %@", key);
+            continue;
         } else if ([key isEqualToString:@"comments"]) {
-            DDLogInfo(@"Copying relationship %@", key);
             [self setComments:[source comments]];
         } else {
-            DDLogInfo(@"Copying relationship %@", key);
             [self setValue: [source valueForKey:key] forKey: key];
         }
     }
@@ -120,9 +241,11 @@
 - (void)deleteRevision
 {
     if (self.revision) {
-        [self.managedObjectContext performBlock:^{
+        [self.managedObjectContext performBlockAndWait :^{
             [self.managedObjectContext deleteObject:self.revision];
+            [self willChangeValueForKey:@"revision"];
             [self setPrimitiveValue:nil forKey:@"revision"];
+            [self didChangeValueForKey:@"revision"];
         }];
     }
 }
@@ -153,14 +276,56 @@
     return ([self original] == nil);
 }
 
+- (AbstractPost *)latest
+{
+    // Even though we currently only support 1 revision per-post, we have plans to support multiple
+    // revisions in the future.  That's the reason why we call `[[self revision] latest]` below.
+    //
+    //  - Diego Rey Mendez, May 19, 2016
+    //
+    return [self hasRevision] ? [[self revision] latest] : self;
+}
+
 - (AbstractPost *)revision
 {
-    return [self primitiveValueForKey:@"revision"];
+    [self willAccessValueForKey:@"revision"];
+    AbstractPost *revision = [self primitiveValueForKey:@"revision"];
+    [self didAccessValueForKey:@"revision"];
+
+    return revision;
 }
 
 - (AbstractPost *)original
 {
-    return [self primitiveValueForKey:@"original"];
+    [self willAccessValueForKey:@"original"];
+    AbstractPost *original = [self primitiveValueForKey:@"original"];
+    [self didAccessValueForKey:@"original"];
+
+    return original;
+}
+
+
+#pragma mark - Helpers
+
+- (BOOL)dateCreatedIsNilOrEqualToDateModified
+{
+    return self.date_created_gmt == nil || [self.date_created_gmt isEqualToDate:self.dateModified];
+}
+
+- (NSString *)availableStatusForPublishOrScheduled
+{
+    if ([self hasFuturePublishDate]) {
+        return PostStatusScheduled;
+    }
+    return PostStatusPublish;
+}
+
+- (NSArray *)availableStatusesForEditing
+{
+    // Note: Read method description before changing values.
+    return @[PostStatusDraft,
+             PostStatusPending,
+             [self availableStatusForPublishOrScheduled]];
 }
 
 - (BOOL)hasSiteSpecificChanges
@@ -237,6 +402,16 @@
     return self.revision != nil;
 }
 
+- (BOOL)hasNeverAttemptedToUpload
+{
+    return self.remoteStatus == AbstractPostRemoteStatusLocal;
+}
+
+- (BOOL)hasRemote
+{
+    return ((self.postID != nil) && ([self.postID longLongValue] > 0));
+}
+
 - (void)findComments
 {
     NSSet *comments = [self.blog.comments filteredSetUsingPredicate:
@@ -246,34 +421,49 @@
     }
 }
 
-- (void)setFeaturedImage:(Media *)featuredImage
-{
-    self.post_thumbnail = featuredImage.mediaID;
-}
 
-- (Media *)featuredImage
+
+#pragma mark - Convenience methods
+
+// This is different than isScheduled. See .h for details.
+- (BOOL)hasFuturePublishDate
 {
-    if (!self.post_thumbnail) {
-        return nil;
+    if (!self.date_created_gmt) {
+        return NO;
     }
-    
-    Media *featuredMedia = [[self.blog.media objectsPassingTest:^BOOL(id obj, BOOL *stop) {
-        Media *media = (Media *)obj;
-        if (media.mediaID) {
-            *stop = [self.post_thumbnail isEqualToNumber:media.mediaID];
-        }
-        return *stop;
-    }] anyObject];
-
-    return featuredMedia;
+    return (self.date_created_gmt == [self.date_created_gmt laterDate:[NSDate date]]);
 }
 
+// If the post has a scheduled status.
+- (BOOL)isScheduled
+{
+    return ([self.status isEqualToString:PostStatusScheduled]);
+}
 
-#pragma mark - WPPostContentViewProvider protocol
+- (BOOL)isDraft
+{
+    if ([self.status isEqualToString:PostStatusDraft]) {
+        return YES;
+    } else if (self.isRevision && [self.original.status isEqualToString:PostStatusDraft]) {
+        return YES;
+    }
+    return NO;
+}
+
+- (void)publishImmediately
+{
+    self.dateModified = [NSDate date];
+    [self setDateCreated:self.dateModified];
+}
+
+- (BOOL)shouldPublishImmediately
+{
+    return [self isDraft] && [self dateCreatedIsNilOrEqualToDateModified];
+}
 
 - (NSString *)authorNameForDisplay
 {
-    return self.author;
+    return [NSString makePlainText:self.author];
 }
 
 - (NSURL *)avatarURLForDisplay
@@ -283,7 +473,7 @@
 
 - (NSString *)blogNameForDisplay
 {
-    return self.blog.settings.name;
+    return [NSString makePlainText:self.blog.settings.name];
 }
 
 - (NSURL *)blogURL
@@ -308,11 +498,16 @@
 
 - (NSString *)dateStringForDisplay
 {
-    NSDate *date = [self dateCreated];
-    if (!date) {
+    if ([self isDraft] || [self.status isEqualToString:PostStatusPending]) {
+        NSString *shortDate = [[self dateModified] mediumString];
+        NSString *lastModified = NSLocalizedString(@"last-modified",@"A label for a post's last-modified date.");
+        return [NSString stringWithFormat:@"%@ (%@)", shortDate, lastModified];
+    } else if ([self isScheduled]) {
+        return [[self dateCreated] mediumStringWithTime];
+    } else if ([self shouldPublishImmediately]) {
         return NSLocalizedString(@"Publish Immediately",@"A short phrase indicating a post is due to be immedately published.");
     }
-    return [date shortString];
+    return [[self dateCreated] mediumString];
 }
 
 - (BOOL)supportsStats
@@ -355,9 +550,12 @@
     return [self hasLocalChanges] || [self hasRemoteChanges];
 }
 
-
 - (BOOL)hasLocalChanges
 {
+    if(self.remoteStatus == AbstractPostRemoteStatusLocal || self.remoteStatus == AbstractPostRemoteStatusFailed) {
+        return YES;
+    }
+    
     if (![self isRevision]) {
         return NO;
     }
@@ -400,6 +598,12 @@
         return YES;
     }
     
+    if (!([self.mt_excerpt length] == 0 && [original.mt_excerpt length] == 0)
+        && (![self.mt_excerpt isEqual:original.mt_excerpt]))
+    {
+        return YES;
+    }
+
     return NO;
 }
 
@@ -407,6 +611,12 @@
 {
     return (self.hasRemote == NO
             || self.remoteStatus == AbstractPostRemoteStatusFailed);
+}
+
+- (void)markRemoteStatusFailed
+{
+    self.remoteStatus = AbstractPostRemoteStatusFailed;
+    [self save];
 }
 
 @end

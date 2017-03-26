@@ -1,49 +1,45 @@
 import Foundation
 import WordPressShared
 
-@objc public class NoteBlockTextTableViewCell : NoteBlockTableViewCell, RichTextViewDataSource, RichTextViewDelegate
-{
+
+class NoteBlockTextTableViewCell: NoteBlockTableViewCell, RichTextViewDataSource, RichTextViewDelegate {
     // MARK: - Public Properties
-    public var onUrlClick: ((NSURL) -> Void)?
-    public var onAttachmentClick: ((NSTextAttachment) -> Void)?
-    public var attributedText: NSAttributedString? {
+    var onUrlClick: ((URL) -> Void)?
+    var onAttachmentClick: ((NSTextAttachment) -> Void)?
+    var attributedText: NSAttributedString? {
         set {
             textView.attributedText = newValue
-            setNeedsLayout()
+            invalidateIntrinsicContentSize()
         }
         get {
             return textView.attributedText
         }
     }
-    
-    public override var isBadge: Bool {
+
+    override var isBadge: Bool {
         didSet {
             backgroundColor = WPStyleGuide.Notifications.blockBackgroundColorForRichText(isBadge)
         }
     }
-    
-    public var linkColor: UIColor? {
+
+    var linkColor: UIColor? {
         didSet {
             if let unwrappedLinkColor = linkColor {
-                textView.linkTextAttributes = [NSForegroundColorAttributeName : unwrappedLinkColor]
+                textView.linkTextAttributes = [NSForegroundColorAttributeName as NSObject: unwrappedLinkColor]
             }
         }
     }
-    
-    public var dataDetectors: UIDataDetectorTypes {
+
+    var dataDetectors: UIDataDetectorTypes {
         set {
-            textView.dataDetectorTypes = newValue ?? .None
+            textView.dataDetectorTypes = newValue
         }
         get {
             return textView.dataDetectorTypes
         }
     }
-    
-    public var labelPadding: UIEdgeInsets {
-        return self.dynamicType.defaultLabelPadding
-    }
-    
-    public var isTextViewSelectable: Bool {
+
+    var isTextViewSelectable: Bool {
         set {
             textView.selectable = newValue
         }
@@ -52,60 +48,55 @@ import WordPressShared
         }
     }
 
-    public var isTextViewClickable: Bool {
+    var isTextViewClickable: Bool {
         set {
-            textView.userInteractionEnabled = newValue
+            textView.isUserInteractionEnabled = newValue
         }
         get {
-            return textView.userInteractionEnabled
+            return textView.isUserInteractionEnabled
         }
     }
-    
+
     // MARK: - View Methods
-    public override func awakeFromNib() {
+    override func awakeFromNib() {
         super.awakeFromNib()
-                
-        backgroundColor             = WPStyleGuide.Notifications.blockBackgroundColor
-        selectionStyle              = .None
-        
+
+        backgroundColor = WPStyleGuide.Notifications.blockBackgroundColor
+        selectionStyle = .none
+
         assert(textView != nil)
-        textView.contentInset       = UIEdgeInsetsZero
-        textView.textContainerInset = UIEdgeInsetsZero
-        textView.backgroundColor    = UIColor.clearColor()
-        textView.editable           = false
-        textView.selectable         = true
-        textView.dataDetectorTypes  = .None
-        textView.dataSource         = self
-        textView.delegate           = self
-        
+        textView.contentInset = UIEdgeInsets.zero
+        textView.textContainerInset = UIEdgeInsets.zero
+        textView.backgroundColor = UIColor.clear
+        textView.editable = false
+        textView.selectable = true
+        textView.dataDetectorTypes = UIDataDetectorTypes()
+        textView.dataSource = self
+        textView.delegate = self
+
         textView.translatesAutoresizingMaskIntoConstraints = false
     }
-    
-    public override func layoutSubviews() {
-        // Calculate the TextView's width, before hitting layoutSubviews!
-        textView.preferredMaxLayoutWidth = min(bounds.width, self.dynamicType.maxWidth) - labelPadding.left - labelPadding.right
-        super.layoutSubviews()
-    }
-        
+
+
     // MARK: - RichTextView Data Source
-    public func textView(textView: UITextView, shouldInteractWithURL URL: NSURL, inRange characterRange: NSRange) -> Bool {
+    func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange) -> Bool {
         onUrlClick?(URL)
         return false
     }
-    
-    public func textView(textView: UITextView, didPressLink link: NSURL) {
+
+    func textView(_ textView: UITextView, didPressLink link: URL) {
         onUrlClick?(link)
     }
-    
-    public func textView(textView: UITextView, shouldInteractWithTextAttachment textAttachment: NSTextAttachment, inRange characterRange: NSRange) -> Bool {
+
+    func textView(_ textView: UITextView, shouldInteractWith textAttachment: NSTextAttachment, in characterRange: NSRange) -> Bool {
         onAttachmentClick?(textAttachment)
         return false
     }
-    
+
+
     // MARK: - Constants
-    public static let maxWidth            = WPTableViewFixedWidth
-    public static let defaultLabelPadding = UIEdgeInsets(top: 0.0, left: 12.0, bottom: 0.0, right: 12.0)
-    
+    static let defaultLabelPadding = UIEdgeInsets(top: 0.0, left: 12.0, bottom: 0.0, right: 12.0)
+
     // MARK: - IBOutlets
-    @IBOutlet private weak var textView: RichTextView!
+    @IBOutlet fileprivate weak var textView: RichTextView!
 }

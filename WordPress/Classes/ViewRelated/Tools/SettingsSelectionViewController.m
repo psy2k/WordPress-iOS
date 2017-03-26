@@ -3,7 +3,6 @@
 #import "NSDictionary+SafeExpectations.h"
 #import "NSString+XMLExtensions.h"
 #import "WPTableViewCell.h"
-#import "WPTableViewSectionHeaderFooterView.h"
 
 NSString * const SettingsSelectionTitleKey = @"Title";
 NSString * const SettingsSelectionTitlesKey = @"Titles";
@@ -12,9 +11,7 @@ NSString * const SettingsSelectionHintsKey = @"Hints";
 NSString * const SettingsSelectionDefaultValueKey = @"DefaultValue";
 NSString * const SettingsSelectionCurrentValueKey = @"CurrentValue";
 
-@interface SettingsSelectionViewController ()
-@property (nonatomic, strong) WPTableViewSectionHeaderFooterView *hintView;
-@end
+CGFloat const SettingsSelectionDefaultTableViewCellHeight = 44.0f;
 
 @implementation SettingsSelectionViewController
 
@@ -38,15 +35,27 @@ NSString * const SettingsSelectionCurrentValueKey = @"CurrentValue";
 {
     self = [self initWithStyle:style];
     if (self) {
-        self.title = [dictionary stringForKey:SettingsSelectionTitleKey];
-        _titles = [dictionary arrayForKey:SettingsSelectionTitlesKey];
-        _values = [dictionary arrayForKey:SettingsSelectionValuesKey];
-        _hints = [dictionary arrayForKey:SettingsSelectionHintsKey];
-        _defaultValue = dictionary[SettingsSelectionDefaultValueKey];
-        _currentValue = dictionary[SettingsSelectionCurrentValueKey] ?: _defaultValue;
+        [self setupWithDictionary:dictionary];
     }
-    
     return self;
+}
+
+- (void)setupWithDictionary:(NSDictionary *)dictionary
+{
+    self.title = [dictionary stringForKey:SettingsSelectionTitleKey];
+    _titles = [dictionary arrayForKey:SettingsSelectionTitlesKey];
+    _values = [dictionary arrayForKey:SettingsSelectionValuesKey];
+    _hints = [dictionary arrayForKey:SettingsSelectionHintsKey];
+    _defaultValue = dictionary[SettingsSelectionDefaultValueKey];
+    _currentValue = dictionary[SettingsSelectionCurrentValueKey] ?: _defaultValue;
+}
+
+- (void)setupRefreshControl
+{
+    if (self.onRefresh && !self.refreshControl) {
+        self.refreshControl = [[UIRefreshControl alloc] init];
+        [self.refreshControl addTarget:self action:@selector(refreshControlValueChanged:) forControlEvents:UIControlEventValueChanged];
+    }
 }
 
 - (void)viewDidLoad
@@ -57,21 +66,30 @@ NSString * const SettingsSelectionCurrentValueKey = @"CurrentValue";
         self.tableView.tableFooterView = [UIView new];
     }
 
-    [self configureCancelButton];
+    [self setupRefreshControl];
 
-    [WPStyleGuide resetReadableMarginsForTableView:self.tableView];
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
 }
 
-- (void)configureCancelButton
+- (void)viewWillAppear:(BOOL)animated
 {
-    if ([self.navigationController.viewControllers count] > 1) {
-        // showing a back button instead
-        return;
+    [super viewWillAppear:animated];
+
+    if (self.invokesRefreshOnViewWillAppear && self.onRefresh) {
+        // Go ahead and trigger a refresh on viewDidLoad.
+        self.onRefresh(nil);
+    }
+}
+
+- (CGSize)preferredContentSize
+{
+    CGSize size = [super preferredContentSize];
+
+    if (self.tableView.style == UITableViewStylePlain) {
+        size.height = [self.titles count] * SettingsSelectionDefaultTableViewCellHeight;
     }
 
-    UIBarButtonItem *cancelButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(didTapCancelButton:)];
-    self.navigationItem.rightBarButtonItem = cancelButton;
+    return size;
 }
 
 - (void)didTapCancelButton:(id)sender
@@ -82,20 +100,40 @@ NSString * const SettingsSelectionCurrentValueKey = @"CurrentValue";
     }
 }
 
-- (UIView *)hintView
+- (void)refreshControlValueChanged:(UIRefreshControl *)refreshControl
 {
-    if (!self.hints) {
-        return nil;
+    if (self.onRefresh) {
+        self.onRefresh(refreshControl);
+    } else {
+        [refreshControl endRefreshing];
     }
-    
-    if (!_hintView) {
-        _hintView = [[WPTableViewSectionHeaderFooterView alloc] initWithReuseIdentifier:nil style:WPTableViewSectionStyleFooter];
-    }
-    
-    NSUInteger position = [self.values indexOfObject:self.currentValue];
-    _hintView.title = (position != NSNotFound) ? self.hints[position] : [NSString string];
+}
 
-    return _hintView;
+#pragma mark - Public Instance Methods
+
+- (void)setOnRefresh:(void (^)(UIRefreshControl *))onRefresh
+{
+    if (_onRefresh != onRefresh) {
+        _onRefresh = onRefresh;
+        [self setupRefreshControl];
+    }
+}
+
+- (void)reloadWithDictionary:(NSDictionary *)dictionary
+{
+    [self setupWithDictionary:dictionary];
+    [self.tableView reloadData];
+}
+
+- (void)configureCancelBarButtonItem
+{
+    UIBarButtonItem *cancelButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(didTapCancelButton:)];
+    self.navigationItem.rightBarButtonItem = cancelButton;
+}
+
+- (void)dismiss
+{
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 #pragma mark - Table view data source
@@ -144,14 +182,15 @@ NSString * const SettingsSelectionCurrentValueKey = @"CurrentValue";
     }
 }
 
-- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
-    return self.hintView;
+    NSUInteger position = [self.values indexOfObject:self.currentValue];
+    return (position != NSNotFound) ? self.hints[position] : nil;
 }
 
-- (void)dismiss
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section
 {
-    [self.navigationController popViewControllerAnimated:YES];
+    [WPStyleGuide configureTableViewSectionFooter:view];
 }
 
 @end

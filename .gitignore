@@ -8,7 +8,6 @@ Icon
 .Trashes
 
 # Xcode
-.DS_Store
 */build/*
 *.pbxuser
 !default.pbxuser
@@ -58,3 +57,12 @@ WordPress/WordPress.xcodeproj/xcuserdata
 WordPress/InfoPlist.h
 # coverage.py
 */CoverageData/*
+
+# Bundler
+/vendor/bundle/
+.bundle/
+
+# Dependencies
+/vendor/
+Scripts/fastlane/metadata
+Scripts/fastlane/Preview.html

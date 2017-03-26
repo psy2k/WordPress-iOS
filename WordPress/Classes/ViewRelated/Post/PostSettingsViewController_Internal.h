@@ -5,12 +5,14 @@ typedef enum {
     PostSettingsSectionMeta,
     PostSettingsSectionFormat,
     PostSettingsSectionFeaturedImage,
-    PostSettingsSectionGeolocation
+    PostSettingsSectionShare,
+    PostSettingsSectionGeolocation,
+    PostSettingsSectionMoreOptions
 } PostSettingsSection;
 
 
 @interface PostSettingsViewController ()
 
-@property (nonatomic, strong) NSMutableArray *sections;
+@property (nonatomic, strong) NSArray *sections;
 
 @end

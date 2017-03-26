@@ -1,75 +1,61 @@
 import UIKit
 import WordPressComAnalytics
 
-public class WP3DTouchShortcutHandler: NSObject
-{
+open class WP3DTouchShortcutHandler: NSObject {
     enum ShortcutIdentifier: String {
         case LogIn
         case NewPost
         case NewPhotoPost
         case Stats
         case Notifications
-        
+
         init?(fullType: String) {
-            guard let last = fullType.componentsSeparatedByString(".").last else {
-                        return nil
-                    }
-            
+            guard let last = fullType.components(separatedBy: ".").last else {
+                return nil
+            }
+
             self.init(rawValue: last)
         }
-        
+
         var type: String {
-            return NSBundle.mainBundle().bundleIdentifier! + ".\(self.rawValue)"
+            return Bundle.main.bundleIdentifier! + ".\(self.rawValue)"
         }
     }
-    
+
     static let applicationShortcutUserInfoIconKey = "applicationShortcutUserInfoIconKey"
-    
-    public func handleShortcutItem(shortcutItem: UIApplicationShortcutItem) -> Bool {
-        var handled = false
-        
-        guard let shortCutType = shortcutItem.type as String? else {
-                    return false
-                }
-        
+
+    open func handleShortcutItem(_ shortcutItem: UIApplicationShortcutItem) -> Bool {
         let tabBarController: WPTabBarController = WPTabBarController.sharedInstance()
-        
-        switch shortCutType {
+
+        switch shortcutItem.type {
             case ShortcutIdentifier.LogIn.type:
-                WPAnalytics.track(.ShortcutLogIn)
-                handled = true
-                break
+                WPAnalytics.track(.shortcutLogIn)
+                return true
             case ShortcutIdentifier.NewPost.type:
-                WPAnalytics.track(.ShortcutNewPost)
-                tabBarController.showPostTabWithOptions([WPPostViewControllerOptionNotAnimated: true])
-                handled = true
-                break
+                WPAnalytics.track(.shortcutNewPost)
+                tabBarController.showPostTab(animated: false, toMedia: false)
+                return true
             case ShortcutIdentifier.NewPhotoPost.type:
-                WPAnalytics.track(.ShortcutNewPhotoPost)
-                tabBarController.showPostTabWithOptions([WPPostViewControllerOptionOpenMediaPicker: true, WPPostViewControllerOptionNotAnimated: true])
-                handled = true
-                break
+                WPAnalytics.track(.shortcutNewPhotoPost)
+                tabBarController.showPostTab(animated: false, toMedia: true)
+                return true
             case ShortcutIdentifier.Stats.type:
-                WPAnalytics.track(.ShortcutStats)
+                WPAnalytics.track(.shortcutStats)
                 clearCurrentViewController()
                 let blogService: BlogService = BlogService(managedObjectContext: ContextManager.sharedInstance().mainContext)
-                tabBarController.switchMySitesTabToStatsViewForBlog(blogService.lastUsedOrFirstBlog())
-                handled = true
-                break
+                tabBarController.switchMySitesTabToStatsView(for: blogService.lastUsedOrFirstBlog())
+                return true
             case ShortcutIdentifier.Notifications.type:
-                WPAnalytics.track(.ShortcutNotifications)
+                WPAnalytics.track(.shortcutNotifications)
                 clearCurrentViewController()
                 tabBarController.showNotificationsTab()
-                handled = true
-                break
+                return true
             default:
-                break
+                return false
         }
-        
-        return handled
     }
-    
-    private func clearCurrentViewController() {
-        WordPressAppDelegate.sharedInstance().window!.rootViewController?.dismissViewControllerAnimated(false, completion: nil)
+
+    fileprivate func clearCurrentViewController() {
+        WordPressAppDelegate.sharedInstance().window!.rootViewController?.dismiss(animated: false, completion: nil)
     }
 }

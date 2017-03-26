@@ -1,7 +1,6 @@
 #import "WPPickerView.h"
 
 static NSInteger WPPickerToolBarHeight = 44.0f;
-static NSInteger WPPickerStartingWidth = 320.0f;
 
 @interface WPPickerView ()<UIPickerViewDataSource, UIPickerViewDelegate>
 
@@ -48,12 +47,11 @@ static NSInteger WPPickerStartingWidth = 320.0f;
 
 - (void)configureView
 {
-    [self configureToolbar];
-
     UIView *picker = [self viewForPicker];
-    picker.frame = CGRectMake(0.0f, CGRectGetMaxY(self.toolbar.frame), WPPickerStartingWidth, CGRectGetHeight(picker.frame));
+    picker.frame = CGRectMake(0.0f, WPPickerToolBarHeight, CGRectGetWidth(picker.frame), CGRectGetHeight(picker.frame));
+    self.frame = CGRectMake(0.0f, 0.0f, CGRectGetWidth(picker.frame), CGRectGetMaxY(picker.frame));
 
-    self.frame = CGRectMake(0.0f, 0.0f, WPPickerStartingWidth, CGRectGetMaxY(picker.frame));
+    [self configureToolbar];
 
     [self addSubview:picker];
     [self addSubview:self.toolbar];
@@ -61,7 +59,7 @@ static NSInteger WPPickerStartingWidth = 320.0f;
 
 - (void)configureToolbar
 {
-    self.toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0f, 0.0f, WPPickerStartingWidth, WPPickerToolBarHeight)];
+    self.toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0f, 0.0f, CGRectGetWidth(self.frame), WPPickerToolBarHeight)];
     self.toolbar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
 
     UIBarButtonItem *spacer = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
@@ -160,7 +158,7 @@ static NSInteger WPPickerStartingWidth = 320.0f;
 - (UIDatePicker *)datePickerView
 {
     if (!_datePickerView) {
-        UIDatePicker *picker = [[UIDatePicker alloc] init];
+        UIDatePicker *picker = [[UIDatePicker alloc] init];        
         picker.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         picker.datePickerMode = UIDatePickerModeDateAndTime;
         picker.date = self.startingDate;

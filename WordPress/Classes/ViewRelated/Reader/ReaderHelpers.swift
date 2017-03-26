@@ -1,174 +1,139 @@
 import Foundation
-import SVProgressHUD
 import WordPressComAnalytics
 
-public class ReaderHelpers {
-
-    public class func shareController(title:String?, summary:String?, tags:String?, link:String?) -> UIActivityViewController {
-        var activityItems = [AnyObject]()
-        let postDictionary = NSMutableDictionary()
-
-        if let str = title {
-            postDictionary["title"] = str
-        }
-        if let str = summary {
-            postDictionary["summary"] = str
-        }
-        if let str = tags {
-            postDictionary["tags"] = str
-        }
-
-        activityItems.append(postDictionary)
-        if let urlPath = link, url = NSURL(string: urlPath) {
-            activityItems.append(url)
-        }
-
-        let activities = WPActivityDefaults.defaultActivities() as! [UIActivity]
-        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: activities)
-        if let str = title {
-            controller.setValue(str, forKey:"subject")
-        }
-        controller.completionWithItemsHandler = {
-            (activityType:String?, completed:Bool, items: [AnyObject]?, error: NSError?) in
-            
-            if completed {
-                WPActivityDefaults.trackActivityType(activityType)
-            }
-        }
-
-        return controller
-    }
-
-
-    public class func sharePost(post:ReaderPost, fromView anchorView:UIView, inViewController viewController:UIViewController) {
-        let controller = ReaderHelpers.shareController(
-            post.titleForDisplay(),
-            summary: post.contentPreviewForDisplay(),
-            tags: post.tags,
-            link: post.permaLink
-        )
-
-        if !UIDevice.isPad() {
-            viewController.presentViewController(controller, animated: true, completion: nil)
-            return
-        }
-
-        // Silly iPad popover rules.
-        controller.modalPresentationStyle = .Popover
-        viewController.presentViewController(controller, animated: true, completion: nil)
-        if let presentationController = controller.popoverPresentationController {
-            presentationController.permittedArrowDirections = .Unknown
-            presentationController.sourceView = anchorView
-            presentationController.sourceRect = anchorView.bounds
-        }
-    }
-
+/// A collection of helper methods used by the Reader.
+///
+@objc open class ReaderHelpers: NSObject {
 
 
     // MARK: - Topic Helpers
 
-    /**
-    Check if the specified topic is a default topic
 
-    @param topic A ReaderAbstractTopic
-    @return True if the topic is a default topic
-    */
-    public class func isTopicDefault(topic:ReaderAbstractTopic) -> Bool {
-        return topic.isKindOfClass(ReaderDefaultTopic)
+    /// Check if the specified topic is a default topic
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is a default topic
+    ///
+    open class func isTopicDefault(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.isKind(of: ReaderDefaultTopic.self)
     }
 
-    /**
-    Check if the specified topic is a list
 
-    @param topic A ReaderAbstractTopic
-    @return True if the topic is a list topic
-    */
-    public class func isTopicList(topic:ReaderAbstractTopic) -> Bool {
-        return topic.isKindOfClass(ReaderListTopic)
+    /// Check if the specified topic is a list
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is a list topic
+    ///
+    open class func isTopicList(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.isKind(of: ReaderListTopic.self)
     }
 
-    /**
-    Check if the specified topic is a site topic
 
-    @param topic A ReaderAbstractTopic
-    @return True if the topic is a site topic
-    */
-    public class func isTopicSite(topic:ReaderAbstractTopic) -> Bool {
-        return topic.isKindOfClass(ReaderSiteTopic)
+    /// Check if the specified topic is a site topic
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is a site topic
+    ///
+    open class func isTopicSite(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.isKind(of: ReaderSiteTopic.self)
     }
 
-    /**
-    Check if the specified topic is a tag
 
-    @param topic A ReaderAbstractTopic
-    @return True if the topic is a tag topic
-    */
-    public class func isTopicTag(topic:ReaderAbstractTopic) -> Bool {
-        return topic.isKindOfClass(ReaderTagTopic)
+    /// Check if the specified topic is a tag topic
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is a tag topic
+    ///
+    open class func isTopicTag(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.isKind(of: ReaderTagTopic.self)
     }
 
-    /**
-    Check if the specified topic is for Freshly Pressed
 
-    @param topic A ReaderAbstractTopic
-    @return True if the topic is for Freshly Pressed
-    */
-    public class func topicIsFreshlyPressed(topic: ReaderAbstractTopic) -> Bool {
-        let path = topic.path as NSString!
-        return path.hasSuffix("/freshly-pressed")
+    /// Check if the specified topic is a search topic
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is a search topic
+    ///
+    open class func isTopicSearchTopic(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.isKind(of: ReaderSearchTopic.self)
     }
 
-    /**
-     Check if the specified topic is for Discover
 
-     @param topic A ReaderAbstractTopic
-     @return True if the topic is for Discover
-     */
-    public class func topicIsDiscover(topic: ReaderAbstractTopic) -> Bool {
-        let path = topic.path as NSString!
-        return path.containsString("/read/sites/53424024/posts")
+    /// Check if the specified topic is for Freshly Pressed
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is for Freshly Pressed
+    ///
+    open class func topicIsFreshlyPressed(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.path.hasSuffix("/freshly-pressed")
     }
 
-    /**
-    Check if the specified topic is for Following
 
-    @param topic A ReaderAbstractTopic
-    @return True if the topic is for Following
-    */
-    public class func topicIsFollowing(topic: ReaderAbstractTopic) -> Bool {
-        let path = topic.path as NSString!
-        return path.hasSuffix("/read/following")
+    /// Check if the specified topic is for Discover
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is for Discover
+    ///
+    open class func topicIsDiscover(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.path.contains("/read/sites/53424024/posts")
     }
 
-    /**
-    Check if the specified topic is for Posts I Like
 
-    @param topic A ReaderAbstractTopic
-    @return True if the topic is for Posts I Like
-    */
-    public class func topicIsLiked(topic: ReaderAbstractTopic) -> Bool {
-        let path = topic.path as NSString!
-        return path.hasSuffix("/read/liked")
+    /// Check if the specified topic is for Following
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is for Following
+    ///
+    open class func topicIsFollowing(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.path.hasSuffix("/read/following")
+    }
+
+
+    /// Check if the specified topic is for Posts I Like
+    ///
+    /// - Parameters:
+    ///     - topic: A ReaderAbstractTopic
+    ///
+    /// - Returns: True if the topic is for Posts I Like
+    ///
+    open class func topicIsLiked(_ topic: ReaderAbstractTopic) -> Bool {
+        return topic.path.hasSuffix("/read/liked")
     }
 
 
     // MARK: Analytics Helpers
 
-    public class func trackLoadedTopic(topic: ReaderAbstractTopic, withProperties properties:[NSObject : AnyObject]) {
-        var stat:WPAnalyticsStat?
+    open class func trackLoadedTopic(_ topic: ReaderAbstractTopic, withProperties properties: [AnyHashable: Any]) {
+        var stat: WPAnalyticsStat?
 
         if topicIsFreshlyPressed(topic) {
-            stat = .ReaderFreshlyPressedLoaded
+            stat = .readerFreshlyPressedLoaded
 
         } else if isTopicDefault(topic) && topicIsDiscover(topic) {
             // Tracks Discover only if it was one of the default menu items.
-            stat = .ReaderDiscoverViewed
+            stat = .readerDiscoverViewed
 
         } else if isTopicList(topic) {
-            stat = .ReaderListLoaded
+            stat = .readerListLoaded
 
         } else if isTopicTag(topic) {
-            stat = .ReaderTagLoaded
+            stat = .readerTagLoaded
 
         }
         if (stat != nil) {
@@ -177,17 +142,17 @@ public class ReaderHelpers {
     }
 
 
-    public class func statsPropertiesForPost(post:ReaderPost, andValue value:AnyObject?, forKey key:String?) -> [NSObject: AnyObject] {
-        var properties = [NSObject: AnyObject]();
+    open class func statsPropertiesForPost(_ post: ReaderPost, andValue value: AnyObject?, forKey key: String?) -> [AnyHashable: Any] {
+        var properties = [AnyHashable: Any]()
         properties[WPAppAnalyticsKeyBlogID] = post.siteID
         properties[WPAppAnalyticsKeyPostID] = post.postID
         properties[WPAppAnalyticsKeyIsJetpack] = post.isJetpack
-        if let feedID = post.feedID, feedItemID = post.feedItemID {
+        if let feedID = post.feedID, let feedItemID = post.feedItemID {
             properties[WPAppAnalyticsKeyFeedID] = feedID
             properties[WPAppAnalyticsKeyFeedItemID] = feedItemID
         }
 
-        if let value = value, key = key {
+        if let value = value, let key = key {
             properties[key] = value
         }
 
@@ -195,13 +160,63 @@ public class ReaderHelpers {
     }
 
 
-    // MARK: Logged in helper
+    open class func bumpPageViewForPost(_ post: ReaderPost) {
+        // Don't bump page views for feeds else the wrong blog/post get's bumped
+        if post.isExternal && !post.isJetpack {
+            return
+        }
 
-    public class func isLoggedIn() -> Bool {
-        // Is Logged In
-        let service = AccountService(managedObjectContext: ContextManager.sharedInstance().mainContext)
-        let account = service.defaultWordPressComAccount()
-        return account != nil
+        guard
+            let siteID = post.siteID,
+            let postID = post.postID,
+            let host = NSURL(string: post.blogURL)?.host else {
+            return
+        }
+
+        // If the user is an admin on the post's site do not bump the page view unless
+        // the the post is private.
+        if !post.isPrivate() && isUserAdminOnSiteWithID(siteID) {
+            return
+        }
+
+        let pixelStatReferrer = "https://wordpress.com/"
+        let pixel = "https://pixel.wp.com/g.gif"
+        let params: NSArray = [
+            "v=wpcom",
+            "reader=1",
+            "ref=\(pixelStatReferrer)",
+            "host=\(host)",
+            "blog=\(siteID)",
+            "post=\(postID)",
+            NSString(format: "t=%d", arc4random())
+        ]
+
+        let userAgent = WPUserAgent.wordPress()
+        let path  = NSString(format: "%@?%@", pixel, params.componentsJoined(by: "&")) as String
+        let url = URL(string: path)
+
+        let request = NSMutableURLRequest(url: url!)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.addValue(pixelStatReferrer, forHTTPHeaderField: "Referer")
+
+        let session = URLSession.shared
+        let task = session.dataTask(with: request as URLRequest)
+        task.resume()
     }
 
+    open class func isUserAdminOnSiteWithID(_ siteID: NSNumber) -> Bool {
+        let context = ContextManager.sharedInstance().mainContext
+        let blogService = BlogService(managedObjectContext: context)
+        if let blog = blogService.blog(byBlogId: siteID) {
+            return blog.isAdmin
+        }
+        return false
+    }
+
+
+    // MARK: Logged in helper
+
+    open class func isLoggedIn() -> Bool {
+        return AccountHelper.isDotcomAvailable()
+    }
 }

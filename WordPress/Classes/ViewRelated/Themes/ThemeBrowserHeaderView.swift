@@ -1,15 +1,14 @@
 import UIKit
 import WordPressShared
 
-public class ThemeBrowserHeaderView: UICollectionReusableView
-{
+open class ThemeBrowserHeaderView: UICollectionReusableView {
     // MARK: - Constants
 
-    public static let reuseIdentifier = "ThemeBrowserHeaderView"
+    open static let reuseIdentifier = "ThemeBrowserHeaderView"
 
     // MARK: - Private Aliases
-    
-    private typealias Styles = WPStyleGuide.Themes
+
+    fileprivate typealias Styles = WPStyleGuide.Themes
 
     // MARK: - Outlets
 
@@ -20,111 +19,118 @@ public class ThemeBrowserHeaderView: UICollectionReusableView
     @IBOutlet weak var customizeButton: UIButton!
     @IBOutlet weak var detailsButton: UIButton!
     @IBOutlet weak var supportButton: UIButton!
-    @IBOutlet var searchBarBorders: [UIView]!
-    @IBOutlet weak var searchBar: UIView!
-    @IBOutlet weak var searchButton: UIButton!
-    @IBOutlet weak var searchTypeButton: UIButton!
-    
+    @IBOutlet var filterBarBorders: [UIView]!
+    @IBOutlet weak var filterBar: UIView!
+    @IBOutlet weak var filterTypeButton: UIButton!
+
     // MARK: - Properties
 
-    private var theme: Theme? {
+    fileprivate var theme: Theme? {
         didSet {
             currentThemeName.text = theme?.name
         }
     }
-    private var searchType: ThemeType = .All {
+    fileprivate var filterType: ThemeType = .all {
         didSet {
-            Styles.styleSearchTypeButton(searchTypeButton, title: searchType.title)
+            Styles.styleSearchTypeButton(filterTypeButton, title: filterType.title)
         }
     }
-    public weak var presenter: ThemePresenter? {
+    open weak var presenter: ThemePresenter? {
         didSet {
             if let presenter = presenter {
                 theme = presenter.currentTheme()
-                
+
                 if ThemeType.mayPurchase {
-                    searchType = presenter.searchType
+                    filterType = presenter.filterType
                 } else {
-                    searchTypeButton.hidden = true
+                    filterBar.isHidden = true
                 }
             }
         }
     }
-    
+
     // MARK: - GUI
 
-    override public func awakeFromNib() {
+    override open func awakeFromNib() {
         super.awakeFromNib()
-        
-        let buttons = [customizeButton, detailsButton, supportButton, searchButton, searchTypeButton]
-        buttons.forEach { $0.exclusiveTouch = true }
+
+        let buttons = [customizeButton, detailsButton, supportButton, filterTypeButton]
+        buttons.forEach { $0?.isExclusiveTouch = true }
 
         applyStyles()
+        setTextForLabels()
     }
-    
-    private func applyStyles() {
+
+    fileprivate func applyStyles() {
         currentThemeBar.backgroundColor = Styles.currentThemeBackgroundColor
         currentThemeDivider.backgroundColor = Styles.currentThemeDividerColor
 
         currentThemeLabel.font = Styles.currentThemeLabelFont
         currentThemeLabel.textColor = Styles.currentThemeLabelColor
-        
+
         currentThemeName.font = Styles.currentThemeNameFont
         currentThemeName.textColor = Styles.currentThemeNameColor
-        
-        let currentThemeButtons = [customizeButton, detailsButton, supportButton]
-        currentThemeButtons.forEach { Styles.styleCurrentThemeButton($0) }
 
-        searchBar.backgroundColor = Styles.searchBarBackgroundColor
-        searchBarBorders.forEach { $0.backgroundColor = Styles.searchBarBorderColor }
+        let currentThemeButtons = [customizeButton, detailsButton, supportButton]
+        currentThemeButtons.forEach { Styles.styleCurrentThemeButton($0!) }
+
+        filterBar.backgroundColor = Styles.searchBarBackgroundColor
+        filterBarBorders.forEach { $0.backgroundColor = Styles.searchBarBorderColor }
     }
-    
-    override public func prepareForReuse() {
+
+    fileprivate func setTextForLabels() {
+        currentThemeLabel.text = NSLocalizedString("Current Theme", comment: "Current Theme text that appears in the Theme Browser Header")
+        customizeButton.setTitle(NSLocalizedString("Customize", comment: "Customize button that appears in the Theme Browser Header"), for: UIControlState())
+        detailsButton.setTitle(NSLocalizedString("Details", comment: "Details button that appears in the Theme Browser Header"), for: UIControlState())
+        supportButton.setTitle(NSLocalizedString("Support", comment: "Support button that appears in the Theme Browser Header"), for: UIControlState())
+    }
+
+    override open func prepareForReuse() {
         super.prepareForReuse()
         theme = nil
         presenter = nil
     }
 
     // MARK: - Actions
-    
-    @IBAction private func didTapCustomizeButton(sender: UIButton) {
+
+    @IBAction fileprivate func didTapCustomizeButton(_ sender: UIButton) {
         presenter?.presentCustomizeForTheme(theme)
     }
-    
-    @IBAction private func didTapDetailsButton(sender: UIButton) {
+
+    @IBAction fileprivate func didTapDetailsButton(_ sender: UIButton) {
         presenter?.presentDetailsForTheme(theme)
     }
-    
-    @IBAction private func didTapSupportButton(sender: UIButton) {
+
+    @IBAction fileprivate func didTapSupportButton(_ sender: UIButton) {
         presenter?.presentSupportForTheme(theme)
     }
-    
-    private func updateSearchType(type: ThemeType) {
-        guard type != self.searchType else {
+
+    fileprivate func updateFilterType(_ type: ThemeType) {
+        guard type != filterType else {
             return
         }
-        
-        self.searchType = type
-        self.presenter?.searchType = type
+
+        filterType = type
+        presenter?.filterType = type
     }
-    
-    @IBAction func didTapSearchTypeButton(sender: UIButton) {
+
+    @IBAction func didTapSearchTypeButton(_ sender: UIButton) {
         let title = NSLocalizedString("Show themes:", comment: "Alert title picking theme type to browse")
-        let alertController = UIAlertController(title: title, message: nil, preferredStyle: .ActionSheet)
-        
+        let alertController = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
+
         ThemeType.types.forEach { type in
             alertController.addActionWithTitle(type.title,
-                style: .Default,
+                style: .default,
                 handler: { [weak self] (action: UIAlertAction) in
-                    self?.updateSearchType(type)
+                    self?.updateFilterType(type)
             })
         }
 
-        alertController.modalPresentationStyle = .Popover
+        alertController.modalPresentationStyle = .popover
         if let popover = alertController.popoverPresentationController {
-            popover.sourceView = searchTypeButton
-            popover.sourceRect = searchTypeButton.bounds
-            popover.permittedArrowDirections = .Any
+            popover.sourceView = filterTypeButton
+            popover.sourceRect = filterTypeButton.bounds
+            popover.permittedArrowDirections = .any
             popover.canOverlapSourceViewRect = true
         }
         alertController.presentFromRootViewController()

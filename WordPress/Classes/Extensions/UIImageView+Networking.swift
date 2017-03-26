@@ -1,34 +1,46 @@
 import Foundation
 
 
-extension UIImageView
-{
-    public func downloadImage(url: NSURL?, placeholderImage: UIImage?) {
-        downloadImage(url, placeholderImage: placeholderImage, success: nil, failure: nil)
+extension UIImageView {
+    public func downloadImage(_ url: URL?, placeholderImage: UIImage?) {
+        downloadImage(url, placeholderImage: placeholderImage, success: nil, failure: nil, processImage: nil)
     }
-        
-    public func downloadImage(url: NSURL?, placeholderImage: UIImage?, success: ((UIImage) -> ())?, failure: ((NSError!) -> ())?) {
+
+    public func downloadResizedImage(_ url: URL?, placeholderImage: UIImage?, pointSize size: CGSize) {
+        let processor: (UIImage) -> UIImage = { image in
+            return image.resizedImage(with: .scaleAspectFill, bounds: size, interpolationQuality: .high)
+        }
+        downloadImage(url, placeholderImage: placeholderImage, success: nil, failure: nil, processImage: processor)
+    }
+
+    public func downloadImage(_ url: URL?, placeholderImage: UIImage? = nil, success: ((UIImage) -> ())?, failure: ((Error?) -> ())? = nil, processImage processor: ((UIImage) -> UIImage)? = nil) {
         // Failsafe: Halt if the URL is empty
         guard let unwrappedUrl = url else {
             image = placeholderImage
             return
         }
 
-        let request = NSMutableURLRequest(URL: unwrappedUrl)
-        request.HTTPShouldHandleCookies = false
+        let request = NSMutableURLRequest(url: unwrappedUrl)
+        request.httpShouldHandleCookies = false
         request.addValue("image/*", forHTTPHeaderField: "Accept")
-        
-        setImageWithURLRequest(request,
+
+        setImageWith(request as URLRequest,
             placeholderImage: placeholderImage,
             success: { [weak self]
-                (request: NSURLRequest, response: NSHTTPURLResponse?, image: UIImage) -> Void in
-                
-                self?.image = image
-                success?(image)
+                (request: URLRequest, response: HTTPURLResponse?, image: UIImage) -> Void in
+
+                let processedImage: UIImage
+                if let imageProcessor = processor {
+                    processedImage = imageProcessor(image)
+                } else {
+                    processedImage = image
+                }
+
+                self?.image = processedImage
+                success?(processedImage)
             },
-            failure: {
-                (request: NSURLRequest, response: NSHTTPURLResponse?, error: NSError) -> Void in
-                failure?(error)
+            failure: { (urlRequest, response: HTTPURLResponse?, error) in
+                failure?(error as Error)
             }
         )
     }
